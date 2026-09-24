@@ -46,9 +46,9 @@ final class SystemOneResponseContractTest extends TestCase
 
         foreach ($response->answers() as $name => $answer) {
             self::assertTrue(
-                $answer instanceof NoulAnswer || $answer instanceof ScoreAnswer,
+                $answer instanceof NoulAnswer || $answer instanceof ScoreAnswer || $answer instanceof ChoiceAnswer,
                 sprintf(
-                    'answer "%s" in %s should be a NoulAnswer or ScoreAnswer, got %s',
+                    'answer "%s" in %s should be a NoulAnswer, ScoreAnswer, or ChoiceAnswer, got %s',
                     $name,
                     basename($path),
                     $answer::class,
@@ -62,9 +62,18 @@ final class SystemOneResponseContractTest extends TestCase
                 self::assertSame('double', gettype($answer->noul()));
             }
 
+            if ($answer instanceof ChoiceAnswer) {
+                self::assertSame('double', gettype($answer->confidence()));
+                self::assertGreaterThanOrEqual(0.0, $answer->confidence());
+                self::assertLessThanOrEqual(1.0, $answer->confidence());
+                self::assertArrayHasKey($answer->choice(), $answer->probabilities());
+            }
+
             if ($answer instanceof ScoreAnswer) {
                 self::assertSame('double', gettype($answer->score()));
                 self::assertSame('double', gettype($answer->confidence()));
+                self::assertGreaterThanOrEqual(0.0, $answer->confidence());
+                self::assertLessThanOrEqual(1.0, $answer->confidence());
 
                 // Probability and legend keys are level indices ("0", "1", ...). PHP normalises
                 // numeric-looking string array keys to integers, so a literal string key is not
@@ -81,6 +90,24 @@ final class SystemOneResponseContractTest extends TestCase
 
         self::assertGreaterThanOrEqual(0, $response->usage()->inputTokens());
         self::assertGreaterThanOrEqual(0, $response->usage()->outputTokens());
+    }
+
+    #[Test]
+    public function recordedChoiceFixtureHydratesExpectedAnswers(): void
+    {
+        $body = file_get_contents(__DIR__ . '/fixtures/recorded/systemone-35.json');
+        self::assertNotFalse($body);
+
+        $response = SystemOneResponse::fromJson($body);
+
+        $sentiment = $response->answer('sentiment');
+        self::assertInstanceOf(ChoiceAnswer::class, $sentiment);
+        self::assertSame('negative', $sentiment->choice());
+        self::assertSame(1.0, $sentiment->confidence());
+
+        $isComplaint = $response->answer('is_complaint');
+        self::assertInstanceOf(NoulAnswer::class, $isComplaint);
+        self::assertSame(0.92, $isComplaint->noul());
     }
 
     #[Test]

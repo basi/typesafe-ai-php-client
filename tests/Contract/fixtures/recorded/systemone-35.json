@@ -1,0 +1,23 @@
+{
+  "model": "jev-1.13.0",
+  "answers": {
+    "sentiment": {
+      "type": "choice",
+      "choice": "negative",
+      "confidence": 1.0,
+      "probabilities": {
+        "negative": 1.0,
+        "neutral": 0.0,
+        "positive": 0.0
+      }
+    },
+    "is_complaint": {
+      "type": "noul",
+      "noul": 0.92
+    }
+  },
+  "usage": {
+    "input_tokens": 387,
+    "output_tokens": 59
+  }
+}
