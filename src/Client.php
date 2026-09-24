@@ -1,0 +1,235 @@
+<?php
+
+declare(strict_types=1);
+
+namespace TypesafeAi;
+
+use Http\Discovery\Psr17FactoryDiscovery;
+use Psr\Http\Client\ClientInterface as HttpClientInterface;
+use Psr\Http\Message\RequestFactoryInterface;
+use Psr\Http\Message\ResponseInterface;
+use Psr\Http\Message\StreamFactoryInterface;
+use TypesafeAi\Contract\ClientInterface;
+use TypesafeAi\Exception\ApiExceptionFactory;
+use TypesafeAi\Exception\TransportException;
+use TypesafeAi\Http\GuzzleTransportFactory;
+use TypesafeAi\Http\RetryPolicy;
+use TypesafeAi\Http\Transport;
+use TypesafeAi\Request\SystemOneRequest;
+use TypesafeAi\Response\ModelCard;
+use TypesafeAi\Response\SystemOneResponse;
+
+/**
+ * Default client for the typesafe.ai System One API, over any PSR-18 HTTP client.
+ *
+ * Use {@see self::withGuzzle()} for the common case of talking to the real API with Guzzle. The
+ * main constructor accepts any PSR-18 client, which is how
+ * {@see \TypesafeAi\Testing\MockHttpClient} gets wired in for tests.
+ */
+final class Client implements ClientInterface
+{
+    /**
+     * Current version of this package.
+     *
+     * The release workflow bumps this with a regular expression that expects exactly this
+     * declaration shape — `public const VERSION = '<major>.<minor>.<patch>';`, without a type —
+     * so do not add a `string` type to this constant.
+     */
+    public const VERSION = '0.1.0';
+
+    private readonly string $apiKey;
+
+    private readonly Transport $transport;
+
+    private readonly RetryPolicy $retryPolicy;
+
+    public function __construct(
+        string $apiKey,
+        HttpClientInterface $httpClient,
+        ?RequestFactoryInterface $requestFactory = null,
+        ?StreamFactoryInterface $streamFactory = null,
+        private readonly ClientOptions $options = new ClientOptions(),
+    ) {
+        if (trim($apiKey) === '') {
+            throw new \InvalidArgumentException('apiKey must not be empty.');
+        }
+
+        $this->apiKey = $apiKey;
+        $this->transport = new Transport(
+            $httpClient,
+            $requestFactory ?? Psr17FactoryDiscovery::findRequestFactory(),
+            $streamFactory ?? Psr17FactoryDiscovery::findStreamFactory(),
+        );
+        $this->retryPolicy = new RetryPolicy();
+    }
+
+    /**
+     * Build a client backed by Guzzle, discovering PSR-17 factories automatically.
+     */
+    public static function withGuzzle(string $apiKey, ClientOptions $options = new ClientOptions()): self
+    {
+        return new self($apiKey, GuzzleTransportFactory::create($options), options: $options);
+    }
+
+    public function systemOne(SystemOneRequest $request): SystemOneResponse
+    {
+        $effectiveRequest = $request->model() !== null
+            ? $request
+            : new SystemOneRequest($request->state(), $request->questions(), $this->options->defaultModel);
+
+        $body = json_encode($effectiveRequest, JSON_THROW_ON_ERROR);
+
+        return $this->sendWithRetry(
+            'POST',
+            $this->options->baseUrl . '/v1/systemone',
+            $body,
+            static fn (string $responseBody, ?string $requestId): SystemOneResponse
+                => SystemOneResponse::fromJson($responseBody, $requestId),
+        );
+    }
+
+    public function models(): array
+    {
+        return $this->sendWithRetry(
+            'GET',
+            $this->options->baseUrl . '/v1/models',
+            null,
+            static fn (string $responseBody): array => ModelCard::listFromJson($responseBody),
+        );
+    }
+
+    /**
+     * @template T
+     *
+     * @param \Closure(string, ?string): T $hydrate Builds the return value from a 2xx response's
+     *     raw body and request id.
+     *
+     * @return T
+     */
+    private function sendWithRetry(string $method, string $url, ?string $body, \Closure $hydrate): mixed
+    {
+        $attempt = 0;
+
+        while (true) {
+            try {
+                $response = $this->transport->send(
+                    $method,
+                    $url,
+                    $this->headersForAttempt($method, $attempt),
+                    $body,
+                );
+            } catch (TransportException $exception) {
+                if ($this->canRetry($method, $attempt, null, $exception)) {
+                    $this->retryPolicy->sleep($this->retryPolicy->delayMilliseconds($attempt));
+                    $attempt++;
+                    continue;
+                }
+
+                throw $exception;
+            }
+
+            $statusCode = $response->getStatusCode();
+
+            if ($statusCode >= 200 && $statusCode < 300) {
+                return $hydrate((string) $response->getBody(), $this->requestId($response));
+            }
+
+            $lowercaseHeaders = $this->lowercaseHeaders($response);
+
+            if ($this->canRetry($method, $attempt, $statusCode, null)) {
+                $this->retryPolicy->sleep($this->retryPolicy->delayMilliseconds($attempt, $lowercaseHeaders));
+                $attempt++;
+                continue;
+            }
+
+            throw ApiExceptionFactory::fromResponse(
+                $statusCode,
+                (string) $response->getBody(),
+                $lowercaseHeaders,
+                $this->requestId($response),
+            );
+        }
+    }
+
+    private function canRetry(string $method, int $attempt, ?int $statusCode, ?\Throwable $exception): bool
+    {
+        if ($attempt >= $this->maxRetriesFor($method, $statusCode)) {
+            return false;
+        }
+
+        if ($exception !== null) {
+            return $this->retryPolicy->isRetryableException($exception);
+        }
+
+        return $statusCode !== null && $this->retryPolicy->isRetryableStatusCode($statusCode);
+    }
+
+    /**
+     * POST /v1/systemone defaults to $options->maxRetries = 0, since a retried POST can be billed
+     * twice for a probabilistic answer. The one exception is a 429: it means the request was
+     * rejected before it was processed, so it is safe to retry (at least once) when
+     * $options->retryRateLimitedPost is true, even though $maxRetries is 0. GET /v1/models has no
+     * such caveat: it is read-only, so it simply uses $options->modelsMaxRetries.
+     */
+    private function maxRetriesFor(string $method, ?int $statusCode): int
+    {
+        if ($method !== 'POST') {
+            return $this->options->modelsMaxRetries;
+        }
+
+        if ($statusCode === 429 && $this->options->retryRateLimitedPost) {
+            return max($this->options->maxRetries, 1);
+        }
+
+        return $this->options->maxRetries;
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function headersForAttempt(string $method, int $attempt): array
+    {
+        $headers = [
+            'Authorization' => 'Bearer ' . $this->apiKey,
+            'Accept' => 'application/json',
+            'User-Agent' => self::userAgent(),
+            'X-TypeSafe-SDK' => self::userAgent(),
+            'X-TypeSafe-Runtime' => 'php/' . PHP_VERSION,
+        ];
+
+        if ($method === 'POST') {
+            $headers['Content-Type'] = 'application/json';
+        }
+
+        if ($attempt > 0) {
+            $headers['X-TypeSafe-Retry-Count'] = (string) $attempt;
+        }
+
+        return $headers;
+    }
+
+    private static function userAgent(): string
+    {
+        return sprintf('typesafe-ai-php-client/%s', self::VERSION);
+    }
+
+    private function requestId(ResponseInterface $response): ?string
+    {
+        $values = $response->getHeader('x-typesafe-request-id');
+
+        return $values[0] ?? null;
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function lowercaseHeaders(ResponseInterface $response): array
+    {
+        $headers = [];
+        foreach ($response->getHeaders() as $name => $values) {
+            $headers[strtolower($name)] = implode(', ', $values);
+        }
+
+        return $headers;
+    }
+}
