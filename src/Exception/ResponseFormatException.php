@@ -30,4 +30,19 @@ final class ResponseFormatException extends \UnexpectedValueException implements
     {
         return new self(sprintf('%s: field is required but missing.', $path));
     }
+
+    /**
+     * The answer at $path does not have the expected answer kind (`noul`, `choice`, or `score`).
+     *
+     * @param non-empty-string $path Dot-separated path to the answer, e.g. "answers.urgency".
+     */
+    public static function unexpectedAnswerType(string $path, string $expectedType, string $actualType): self
+    {
+        return new self(sprintf(
+            '%s: expected a "%s" answer, got "%s".',
+            $path,
+            $expectedType,
+            $actualType,
+        ));
+    }
 }
