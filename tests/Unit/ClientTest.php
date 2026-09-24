@@ -67,6 +67,39 @@ final class ClientTest extends TestCase
         new Client('   ', new MockHttpClient());
     }
 
+    /**
+     * @return iterable<string, array{0: string}>
+     */
+    public static function invalidApiKeyProvider(): iterable
+    {
+        yield 'contains an interior space' => ['sk with space'];
+        yield 'contains an interior tab' => ["sk\tx"];
+        yield 'contains a non-ASCII character' => ['ké'];
+        yield 'contains a trailing newline' => ["sk\n"];
+    }
+
+    #[Test]
+    #[DataProvider('invalidApiKeyProvider')]
+    public function constructorRejectsAnApiKeyThatIsNotPrintableAsciiWithoutWhitespace(string $apiKey): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        new Client($apiKey, new MockHttpClient());
+    }
+
+    #[Test]
+    public function constructorTrimsSurroundingSpacesFromTheApiKeyAndSendsTheTrimmedValue(): void
+    {
+        $mock = new MockHttpClient([JsonResponse::fromArray(200, ['models' => []])]);
+        $client = new Client('  sk-valid  ', $mock);
+
+        $client->models();
+
+        $request = $mock->lastRequest();
+        self::assertNotNull($request);
+        self::assertSame('Bearer sk-valid', $request->getHeaderLine('Authorization'));
+    }
+
     #[Test]
     public function withGuzzleBuildsAClientWithoutMakingARequest(): void
     {
@@ -423,6 +456,47 @@ final class ClientTest extends TestCase
             self::fail('Expected an exception.');
         } catch (TransportException $exception) {
             self::assertStringNotContainsString('sk-super-secret-value', $exception->getMessage());
+        }
+    }
+
+    #[Test]
+    public function everyFormOfTheApiKeyIsRedactedFromAnApiExceptionMessageButNotFromTheRawBody(): void
+    {
+        $apiKey = 'sk/te"st';
+        $bearer = 'Bearer ' . $apiKey;
+        $jsonEscaped = substr(json_encode($apiKey, JSON_THROW_ON_ERROR), 1, -1);
+        $urlEncoded = rawurlencode($apiKey);
+
+        $mock = new MockHttpClient([JsonResponse::fromArray(401, [
+            'detail' => [
+                'error_type' => 'authentication_error',
+                'message' => sprintf(
+                    'Invalid key. raw=%s bearer=%s json=%s url=%s',
+                    $apiKey,
+                    $bearer,
+                    $jsonEscaped,
+                    $urlEncoded,
+                ),
+            ],
+        ])]);
+        $client = new Client($apiKey, $mock);
+
+        try {
+            $client->systemOne(self::aQuestionRequest());
+            self::fail('Expected an exception.');
+        } catch (AuthenticationException $exception) {
+            $message = $exception->getMessage();
+            self::assertStringNotContainsString($apiKey, $message);
+            self::assertStringNotContainsString($bearer, $message);
+            self::assertStringNotContainsString($jsonEscaped, $message);
+            self::assertStringNotContainsString($urlEncoded, $message);
+            self::assertStringContainsString('***', $message);
+
+            // getRawBody() is documented as the exact, unredacted response body. The URL-encoded
+            // form has no characters that JSON-encoding the fixture body would itself escape
+            // (unlike the raw/JSON-escaped forms, which contain a slash and a double quote), so it
+            // is a reliable witness that the wire body was not touched by redaction.
+            self::assertStringContainsString($urlEncoded, $exception->getRawBody());
         }
     }
 }

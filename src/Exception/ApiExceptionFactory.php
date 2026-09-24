@@ -11,12 +11,25 @@ final class ApiExceptionFactory
 {
     /**
      * @param array<string, string> $headers Response headers, keyed by lower-case header name.
+     * @param ?\Closure(string): string $redact Optional hook that scrubs sensitive values — such
+     *     as the configured API key, in every form {@see \TypesafeAi\Http\Redactor} recognises —
+     *     out of the body-derived reason before it is embedded in the exception message. $body
+     *     itself is never passed through this hook: it is always stored verbatim as
+     *     {@see ApiException::getRawBody()}, which is unredacted upstream data.
      */
-    public static function fromResponse(int $statusCode, string $body, array $headers, ?string $requestId): ApiException
-    {
+    public static function fromResponse(
+        int $statusCode,
+        string $body,
+        array $headers,
+        ?string $requestId,
+        ?\Closure $redact = null,
+    ): ApiException {
         [$errorType, $detailMessage, $validationErrors] = self::parseDetail(self::decode($body));
         $retryAfterMs = self::parseRetryAfterMs($headers);
         $reason = $detailMessage ?? $errorType ?? self::defaultReason($statusCode);
+        if ($redact !== null) {
+            $reason = $redact($reason);
+        }
         $message = sprintf('typesafe.ai API error %d: %s', $statusCode, $reason);
 
         return match (true) {

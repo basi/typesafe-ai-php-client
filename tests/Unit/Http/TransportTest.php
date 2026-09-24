@@ -11,17 +11,18 @@ use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use TypesafeAi\Exception\TimeoutException;
 use TypesafeAi\Exception\TransportException;
+use TypesafeAi\Http\Redactor;
 use TypesafeAi\Http\Transport;
 use TypesafeAi\Testing\JsonResponse;
 use TypesafeAi\Testing\MockHttpClient;
 
 final class TransportTest extends TestCase
 {
-    private static function transport(MockHttpClient $mock): Transport
+    private static function transport(MockHttpClient $mock, ?Redactor $redactor = null): Transport
     {
         $factory = new HttpFactory();
 
-        return new Transport($mock, $factory, $factory);
+        return new Transport($mock, $factory, $factory, $redactor);
     }
 
     #[Test]
@@ -125,7 +126,8 @@ final class TransportTest extends TestCase
             self::fail('Expected a TransportException.');
         } catch (TransportException $exception) {
             self::assertSame(0, $exception->getCode());
-            self::assertInstanceOf(\RuntimeException::class, $exception->getPrevious());
+            self::assertNull($exception->getPrevious());
+            self::assertStringContainsString(\RuntimeException::class, $exception->getMessage());
             self::assertStringContainsString('unexpected failure', $exception->getMessage());
         }
     }
@@ -136,7 +138,7 @@ final class TransportTest extends TestCase
         $mock = new MockHttpClient([
             new \RuntimeException('Failed while sending header Authorization: Bearer sk-super-secret-value'),
         ]);
-        $transport = self::transport($mock);
+        $transport = self::transport($mock, new Redactor('sk-super-secret-value'));
 
         try {
             $transport->send(
@@ -147,7 +149,45 @@ final class TransportTest extends TestCase
             self::fail('Expected a TransportException.');
         } catch (TransportException $exception) {
             self::assertStringNotContainsString('sk-super-secret-value', $exception->getMessage());
-            self::assertStringContainsString('[redacted]', $exception->getMessage());
+            self::assertStringContainsString('***', $exception->getMessage());
+        }
+    }
+
+    #[Test]
+    public function everyFormOfTheApiKeyIsRedactedAndThePreviousExceptionIsDropped(): void
+    {
+        $apiKey = 'sk/te"st';
+        $bearer = 'Bearer ' . $apiKey;
+        $jsonEscaped = substr(json_encode($apiKey, JSON_THROW_ON_ERROR), 1, -1);
+        $urlEncoded = rawurlencode($apiKey);
+
+        $original = new ConnectException(
+            sprintf(
+                'Connection reset. raw=%s bearer=%s json=%s url=%s',
+                $apiKey,
+                $bearer,
+                $jsonEscaped,
+                $urlEncoded,
+            ),
+            new Request('GET', 'https://api.typesafe.ai/v1/models'),
+        );
+        $mock = new MockHttpClient([$original]);
+        $transport = self::transport($mock, new Redactor($apiKey));
+
+        try {
+            $transport->send('GET', 'https://api.typesafe.ai/v1/models', []);
+            self::fail('Expected a TransportException.');
+        } catch (TransportException $exception) {
+            self::assertNotInstanceOf(TimeoutException::class, $exception);
+
+            $message = $exception->getMessage();
+            self::assertStringNotContainsString($apiKey, $message);
+            self::assertStringNotContainsString($bearer, $message);
+            self::assertStringNotContainsString($jsonEscaped, $message);
+            self::assertStringNotContainsString($urlEncoded, $message);
+            self::assertStringContainsString('***', $message);
+            self::assertStringContainsString(ConnectException::class, $message);
+            self::assertNull($exception->getPrevious());
         }
     }
 }
