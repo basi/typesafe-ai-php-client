@@ -98,6 +98,63 @@ printf(
 $rawJson = $response->raw();
 ```
 
+## Packing questions with the builder
+
+`Questions` packs several questions into one request without giving the set itself a name: each
+question gets a positional wire key (`question_0`, `question_1`, ...) unless you name it yourself,
+and the answers come back as a tuple in the same order you declared the questions — handy when you
+always ask the same few things about a piece of content and would rather not invent (and thread
+through) a name for every one of them.
+
+```php
+use TypesafeAi\Request\Questions;
+
+$result = $client->evaluate('I was charged twice for my subscription.', Questions::create()
+    ->choice('What is this ticket about?', ['billing' => null, 'technical' => null, 'other' => null])
+    ->noul('Does this need urgent attention?')
+    ->score('How severe is the issue?', ['minor', 'moderate', 'severe']));
+
+[$category, $urgent, $severity] = $result->answers();   // ChoiceAnswer, NoulAnswer, ScoreAnswer — in declaration order
+printf("%s (confidence %.2f)\n", $category->choice(), $category->confidence());
+printf("urgent: %.2f, severity: %.1f (confidence %.2f)\n", $urgent->noul(), $severity->score(), $severity->confidence());
+$result->requestId();
+```
+
+Name a question yourself with the `name:` argument (e.g. `->choice(..., name: 'category')`) when you
+would rather look it up by name than by position; an explicit name does not shift the positional
+numbering of the questions declared around it. `Client::evaluate()` returns a `TypedSystemOneResponse`
+(see below), whose `answer()`, `noul()`, `choice()`, and `score()` accept either a position or a name.
+
+## Typed decoding
+
+`Client::evaluate()` decodes its response for you, but the same strict decoding step is available
+directly if you build a `SystemOneRequest` yourself, for example because its questions were not
+built with `Questions`:
+
+```php
+use TypesafeAi\Response\TypedSystemOneResponse;
+
+$response = $client->systemOne($request);
+$typed = TypedSystemOneResponse::decode($response, $questions);
+```
+
+`$questions` is either the `Questions` instance used to build the request, or a plain
+`name => QuestionInterface` array in the same order the request declared them. Decoding fails fast
+with a `ResponseFormatException` when a question has no matching answer, or when an answer's kind
+(`noul`/`choice`/`score`) does not match its question's — a mismatch this client would otherwise let
+you discover later, further from the cause, as a `LogicException` from a typed accessor. An answer
+present in the response but not in `$questions` is ignored by `TypedSystemOneResponse`, though it
+stays reachable via `TypedSystemOneResponse::response()`.
+
+## How questions are evaluated
+
+All questions in a single request are evaluated against the same `state` in parallel, in one query
+— the vendor calls this its "parallel sampler." Prefer packing related questions into one request
+(with `Questions`, or a multi-question `SystemOneRequest`) over sending one request per question: it
+is both cheaper and faster than issuing separate requests. The API exposes no controls over that
+sampling — no seed, temperature, or number-of-samples parameter — and, being probabilistic, the same
+question can get a different answer (or confidence) on a repeated call even with identical input.
+
 ## Options
 
 `ClientOptions` configures timeouts, the default model, and retry behaviour. Pass it to

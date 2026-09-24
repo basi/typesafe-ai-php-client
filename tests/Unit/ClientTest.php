@@ -20,8 +20,13 @@ use TypesafeAi\Exception\TimeoutException;
 use TypesafeAi\Exception\TransportException;
 use TypesafeAi\Exception\ValidationException;
 use TypesafeAi\Request\Question\NoulQuestion;
+use TypesafeAi\Request\Questions;
 use TypesafeAi\Request\SystemOneRequest;
+use TypesafeAi\Response\Answer\ChoiceAnswer;
+use TypesafeAi\Response\Answer\NoulAnswer;
+use TypesafeAi\Response\Answer\ScoreAnswer;
 use TypesafeAi\Response\SystemOneResponse;
+use TypesafeAi\Response\TypedSystemOneResponse;
 use TypesafeAi\Testing\JsonResponse;
 use TypesafeAi\Testing\MockHttpClient;
 
@@ -156,6 +161,55 @@ final class ClientTest extends TestCase
         self::assertSame('req_abc123', $response->requestId());
         self::assertSame('jev-latest', $response->model());
         self::assertSame(0.9, $response->answer('billing')->toArray()['noul']);
+    }
+
+    #[Test]
+    public function evaluateSendsOneRequestWithPositionalQuestionKeysAndDecodesTypedAnswers(): void
+    {
+        $mock = new MockHttpClient([
+            JsonResponse::fromArray(200, [
+                'model' => 'jev-latest',
+                'answers' => [
+                    'question_0' => [
+                        'type' => 'choice',
+                        'choice' => 'billing',
+                        'confidence' => 0.9,
+                        'probabilities' => ['billing' => 0.9, 'technical' => 0.1],
+                    ],
+                    'question_1' => ['type' => 'noul', 'noul' => 0.7],
+                    'question_2' => [
+                        'type' => 'score',
+                        'score' => 2.0,
+                        'confidence' => 0.6,
+                        'legend' => ['0' => 'minor', '1' => 'severe'],
+                        'probabilities' => ['0' => 0.4, '1' => 0.6],
+                    ],
+                ],
+                'usage' => ['input_tokens' => 12, 'output_tokens' => 4],
+            ], ['x-typesafe-request-id' => 'req_eval123']),
+        ]);
+        $client = new Client('test-key', $mock, options: new ClientOptions(defaultModel: 'jev-preview'));
+
+        $result = $client->evaluate('some ticket text', Questions::create()
+            ->choice('What is this about?', ['billing' => null, 'technical' => null])
+            ->noul('Is this urgent?')
+            ->score('How severe?', ['minor', 'severe']));
+
+        self::assertCount(1, $mock->requests());
+        $request = $mock->lastRequest();
+        self::assertNotNull($request);
+        $sentBody = json_decode((string) $request->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        self::assertIsArray($sentBody);
+        self::assertIsArray($sentBody['questions']);
+        self::assertSame(['question_0', 'question_1', 'question_2'], array_keys($sentBody['questions']));
+        self::assertSame('jev-preview', $sentBody['model']);
+
+        self::assertInstanceOf(TypedSystemOneResponse::class, $result);
+        $answers = $result->answers();
+        self::assertInstanceOf(ChoiceAnswer::class, $answers[0]);
+        self::assertInstanceOf(NoulAnswer::class, $answers[1]);
+        self::assertInstanceOf(ScoreAnswer::class, $answers[2]);
+        self::assertSame('req_eval123', $result->requestId());
     }
 
     #[Test]

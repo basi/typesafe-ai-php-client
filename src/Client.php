@@ -12,12 +12,15 @@ use Psr\Http\Message\StreamFactoryInterface;
 use TypesafeAi\Contract\ClientInterface;
 use TypesafeAi\Exception\ApiExceptionFactory;
 use TypesafeAi\Exception\TransportException;
+use TypesafeAi\Exception\TypesafeAiException;
 use TypesafeAi\Http\GuzzleTransportFactory;
 use TypesafeAi\Http\RetryPolicy;
 use TypesafeAi\Http\Transport;
+use TypesafeAi\Request\Questions;
 use TypesafeAi\Request\SystemOneRequest;
 use TypesafeAi\Response\ModelCard;
 use TypesafeAi\Response\SystemOneResponse;
+use TypesafeAi\Response\TypedSystemOneResponse;
 
 /**
  * Default client for the typesafe.ai System One API, over any PSR-18 HTTP client.
@@ -86,6 +89,20 @@ final class Client implements ClientInterface
             static fn (string $responseBody, ?string $requestId): SystemOneResponse
                 => SystemOneResponse::fromJson($responseBody, $requestId),
         );
+    }
+
+    /**
+     * Builder entry point: evaluate $questions against $state in a single request, and strictly
+     * decode the answers back out as a tuple in $questions' declaration order.
+     *
+     * @see Questions for building $questions.
+     * @see TypedSystemOneResponse for how the answers are decoded and accessed.
+     *
+     * @throws TypesafeAiException
+     */
+    public function evaluate(mixed $state, Questions $questions, ?string $model = null): TypedSystemOneResponse
+    {
+        return TypedSystemOneResponse::decode($this->systemOne($questions->toRequest($state, $model)), $questions);
     }
 
     public function models(): array
