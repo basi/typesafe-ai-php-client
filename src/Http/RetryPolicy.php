@@ -133,6 +133,6 @@ final class RetryPolicy
 
         $now = ($this->clock)()->getTimestamp();
 
-        return max(0, ($target - $now) * 1000);
+        return (int) max(0, ($target - $now) * 1000);
     }
 }
