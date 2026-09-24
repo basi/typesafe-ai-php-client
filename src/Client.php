@@ -49,6 +49,16 @@ final class Client implements ClientInterface
 
     private readonly RetryPolicy $retryPolicy;
 
+    /**
+     * @param string $apiKey typesafe.ai API key. Leading and trailing ASCII space characters
+     *     (0x20) are trimmed; tabs, newlines, and other control characters are not, since a key
+     *     that still contains one after that is more likely truncated or corrupted than padded,
+     *     and this validates as invalid rather than silently stripping it. The trimmed result
+     *     must be a non-empty string of printable ASCII characters with no interior whitespace,
+     *     or the constructor throws an `\InvalidArgumentException`. The trimmed value is what is
+     *     sent as the `Authorization: Bearer` header and is what {@see Redactor} scrubs out of
+     *     exception messages this client builds from upstream text.
+     */
     public function __construct(
         string $apiKey,
         HttpClientInterface $httpClient,
@@ -56,8 +66,15 @@ final class Client implements ClientInterface
         ?StreamFactoryInterface $streamFactory = null,
         private readonly ClientOptions $options = new ClientOptions(),
     ) {
-        if (trim($apiKey) === '') {
-            throw new \InvalidArgumentException('apiKey must not be empty.');
+        $apiKey = trim($apiKey, ' ');
+
+        // The /D modifier is required so that $ anchors strictly to the end of the string: without
+        // it, PCRE lets $ match just before a trailing "\n", which would let a key with a trailing
+        // newline slip through as if it had been trimmed.
+        if ($apiKey === '' || preg_match('/^[\x21-\x7E]+$/D', $apiKey) !== 1) {
+            throw new \InvalidArgumentException(
+                'apiKey must be a non-empty ASCII string without whitespace or control characters.',
+            );
         }
 
         $this->apiKey = $apiKey;

@@ -67,6 +67,39 @@ final class ClientTest extends TestCase
         new Client('   ', new MockHttpClient());
     }
 
+    /**
+     * @return iterable<string, array{0: string}>
+     */
+    public static function invalidApiKeyProvider(): iterable
+    {
+        yield 'contains an interior space' => ['sk with space'];
+        yield 'contains an interior tab' => ["sk\tx"];
+        yield 'contains a non-ASCII character' => ['ké'];
+        yield 'contains a trailing newline' => ["sk\n"];
+    }
+
+    #[Test]
+    #[DataProvider('invalidApiKeyProvider')]
+    public function constructorRejectsAnApiKeyThatIsNotPrintableAsciiWithoutWhitespace(string $apiKey): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        new Client($apiKey, new MockHttpClient());
+    }
+
+    #[Test]
+    public function constructorTrimsSurroundingSpacesFromTheApiKeyAndSendsTheTrimmedValue(): void
+    {
+        $mock = new MockHttpClient([JsonResponse::fromArray(200, ['models' => []])]);
+        $client = new Client('  sk-valid  ', $mock);
+
+        $client->models();
+
+        $request = $mock->lastRequest();
+        self::assertNotNull($request);
+        self::assertSame('Bearer sk-valid', $request->getHeaderLine('Authorization'));
+    }
+
     #[Test]
     public function withGuzzleBuildsAClientWithoutMakingARequest(): void
     {
