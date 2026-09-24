@@ -7,6 +7,8 @@ version: 2
 updates:
   - package-ecosystem: "composer"
     directory: "/"
+    # Replace exact version pins instead of widening library requirements.
+    versioning-strategy: "increase"
     schedule:
       interval: "weekly"
       day: "monday"

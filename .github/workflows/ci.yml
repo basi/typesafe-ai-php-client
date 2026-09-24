@@ -28,7 +28,8 @@ jobs:
           coverage: none
 
       - name: Validate composer.json
-        run: composer validate --strict
+        # Exact dependency versions are intentional; keep other validation strict.
+        run: composer validate --strict --no-check-all
 
       - name: Locate Composer cache directory
         id: composer-cache
