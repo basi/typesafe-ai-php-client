@@ -14,6 +14,7 @@ use TypesafeAi\Exception\ApiExceptionFactory;
 use TypesafeAi\Exception\TransportException;
 use TypesafeAi\Exception\TypesafeAiException;
 use TypesafeAi\Http\GuzzleTransportFactory;
+use TypesafeAi\Http\Redactor;
 use TypesafeAi\Http\RetryPolicy;
 use TypesafeAi\Http\Transport;
 use TypesafeAi\Request\Questions;
@@ -42,6 +43,8 @@ final class Client implements ClientInterface
 
     private readonly string $apiKey;
 
+    private readonly Redactor $redactor;
+
     private readonly Transport $transport;
 
     private readonly RetryPolicy $retryPolicy;
@@ -58,10 +61,12 @@ final class Client implements ClientInterface
         }
 
         $this->apiKey = $apiKey;
+        $this->redactor = new Redactor($apiKey);
         $this->transport = new Transport(
             $httpClient,
             $requestFactory ?? Psr17FactoryDiscovery::findRequestFactory(),
             $streamFactory ?? Psr17FactoryDiscovery::findStreamFactory(),
+            $this->redactor,
         );
         $this->retryPolicy = new RetryPolicy();
     }
@@ -164,6 +169,7 @@ final class Client implements ClientInterface
                 (string) $response->getBody(),
                 $lowercaseHeaders,
                 $this->requestId($response),
+                $this->redactor->redact(...),
             );
         }
     }

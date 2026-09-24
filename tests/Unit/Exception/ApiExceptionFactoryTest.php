@@ -163,4 +163,24 @@ final class ApiExceptionFactoryTest extends TestCase
         self::assertStringNotContainsString('sk-should-not-appear-in-message', $exception->getMessage());
         self::assertStringContainsString('sk-should-not-appear-in-message', $exception->getRawBody());
     }
+
+    #[Test]
+    public function appliesTheRedactCallbackToTheReasonButNeverToTheRawBody(): void
+    {
+        $body = json_encode([
+            'detail' => ['error_type' => 'authentication_error', 'message' => 'token sk-secret is invalid'],
+        ], JSON_THROW_ON_ERROR);
+
+        $exception = ApiExceptionFactory::fromResponse(
+            401,
+            $body,
+            [],
+            null,
+            static fn (string $text): string => str_replace('sk-secret', '***', $text),
+        );
+
+        self::assertStringNotContainsString('sk-secret', $exception->getMessage());
+        self::assertStringContainsString('***', $exception->getMessage());
+        self::assertStringContainsString('sk-secret', $exception->getRawBody());
+    }
 }
