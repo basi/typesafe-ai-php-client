@@ -194,6 +194,33 @@ When a retry does happen, this client honours the server's `retry-after-ms` or `
 header (seconds or an HTTP-date) when present; otherwise it backs off from 0.5s, doubling up to a
 5s cap, minus up to 25% random jitter — mirroring the official SDKs.
 
+## Using an AI gateway
+
+The official Python SDK documents pointing itself at a third-party AI gateway instead of the
+typesafe.ai API directly, by overriding `baseUrl` and `defaultModel`. **This has not been tested
+against either gateway with this client** — the values below are exactly what the vendor documents
+for the Python SDK, offered as a starting point rather than a verified configuration:
+
+```php
+use TypesafeAi\Client;
+use TypesafeAi\ClientOptions;
+
+// OpenRouter
+$client = Client::withGuzzle($apiKey, new ClientOptions(
+    baseUrl: 'https://openrouter.ai/api',
+    defaultModel: '~typesafe/jev-latest',
+));
+
+// Vercel AI Gateway
+$client = Client::withGuzzle($apiKey, new ClientOptions(
+    baseUrl: 'https://ai-gateway.vercel.sh/typesafe',
+    defaultModel: 'typesafe-ai/jev',
+));
+```
+
+Check the gateway's own documentation for the API key and model name it expects — they are not
+necessarily your typesafe.ai API key or model name.
+
 ## Errors
 
 Every exception this client throws implements `TypesafeAi\Exception\TypesafeAiException`:
@@ -227,6 +254,22 @@ try {
 
 `ApiExceptionFactory` also builds `AuthenticationException` (401/403), `NotFoundException` (404),
 and `ValidationException` (422, with `getValidationErrors()`), all extending `ApiException`.
+
+### Credentials
+
+The API key is validated when the client is constructed: after trimming surrounding spaces, it
+must be a non-empty, printable ASCII string with no interior whitespace or control characters, or
+the constructor throws an `\InvalidArgumentException`. Every message this client builds from
+upstream text — a `TransportException`/`TimeoutException` message, or the reason embedded in an
+`ApiException` message — has every form of the key it recognises (raw, `Bearer <key>`,
+JSON-escaped, URL-encoded) replaced with `***`. The one exception is `ApiException::getRawBody()`,
+which is documented as the exact, unredacted response body, so treat it the same way you would any
+other data the server sent back.
+
+A transport-level failure never chains the original exception as `getPrevious()`: that message may
+carry the key in a shape redaction cannot reach (for example a string built internally by the HTTP
+client), so it is dropped rather than risk leaking it. The original exception's class name is kept
+in the new message instead, so the cause stays diagnosable.
 
 ## Models
 
