@@ -1,0 +1,19 @@
+{
+    "models": [
+        {
+            "name": "jev-latest",
+            "description": "General-purpose system one model.",
+            "release_date": "2026-09-15"
+        },
+        {
+            "name": "jev-preview",
+            "description": "Preview build with the newest capabilities, ahead of general availability.",
+            "release_date": "2026-09-15"
+        },
+        {
+            "name": "jev-1.13.0",
+            "description": "General-purpose system one model.",
+            "release_date": "2026-09-15"
+        }
+    ]
+}
