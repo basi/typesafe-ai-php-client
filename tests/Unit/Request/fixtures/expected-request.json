@@ -1,0 +1,22 @@
+{
+    "state": {
+        "subject": "Duplicate charge",
+        "body": "I was charged twice. Please help."
+    },
+    "questions": {
+        "billing": {
+            "type": "noul",
+            "instructions": "Is this message about billing?",
+            "criteria": {
+                "true": "A billing or payment issue",
+                "false": "Not related to billing"
+            }
+        },
+        "urgency": {
+            "type": "score",
+            "instructions": "How urgent is this message?",
+            "criteria": ["Can wait", "Needs attention this week", "Needs attention today"]
+        }
+    },
+    "model": "jev-latest"
+}
