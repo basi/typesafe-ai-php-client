@@ -1,0 +1,57 @@
+name: Tag and release version bump
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Tag and release
+    runs-on: ubuntu-latest
+    if: "github.event.pull_request.merged == true && contains(github.event.pull_request.title, 'chore: bump version')"
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+
+      - name: Read version from src/Client.php
+        id: version
+        run: |
+          version=$(grep -oP "public const VERSION = '\K[0-9]+\.[0-9]+\.[0-9]+(?=';)" src/Client.php)
+          if [ -z "$version" ]; then
+            echo "Could not find \"public const VERSION = '<version>';\" in src/Client.php" >&2
+            exit 1
+          fi
+          echo "Version read from src/Client.php: $version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Create tag
+        id: tag
+        uses: mathieudutour/github-tag-action@a22cf08638b34d5badda920f9daf6e72c477b07b # v6.2
+        with:
+          github_token: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+          custom_tag: ${{ steps.version.outputs.version }}
+          tag_prefix: v
+          # This workflow only ever reaches this step for the merge commit of a "chore: bump
+          # version" PR (see the job-level `if`), so it is safe to always treat that commit as
+          # release-worthy here rather than relying on this action's own branch-name matching,
+          # which inspects `github.ref` (refs/pull/<n>/merge for the pull_request event this
+          # workflow runs on) rather than the branch the pull request merged into.
+          release_branches: '.*'
+          # github.sha on a `pull_request` event is GitHub's ephemeral test-merge commit, not the
+          # commit that actually landed on main; merge_commit_sha is the real one to tag.
+          commit_sha: ${{ github.event.pull_request.merge_commit_sha }}
+
+      - name: Create GitHub release
+        uses: ncipollo/release-action@339a81892b84b4eeb0f6e744e4574d79d0d9b8dd # v1.21.0
+        with:
+          token: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+          tag: ${{ steps.tag.outputs.new_tag }}
+          commit: ${{ github.event.pull_request.merge_commit_sha }}
+          name: ${{ steps.tag.outputs.new_tag }}
+          generateReleaseNotes: true

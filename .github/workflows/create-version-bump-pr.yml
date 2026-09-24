@@ -1,0 +1,64 @@
+name: Create version bump PR
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump:
+    name: Open version bump PR
+    runs-on: ubuntu-latest
+    if: "github.event.pull_request.merged == true && !contains(github.event.pull_request.title, 'chore: bump version')"
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+
+      # GH_PAT is optional (falls back to the default GITHUB_TOKEN), but is needed for CI to run
+      # automatically on the pull request this workflow opens: a workflow run cannot trigger other
+      # workflow runs when it authenticates with the default GITHUB_TOKEN, so ci.yml would not
+      # start on the bump PR unless a personal access token is configured as the GH_PAT secret.
+      - name: Check for an existing open bump PR
+        id: existing
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          count=$(gh pr list --repo "${{ github.repository }}" --state open \
+            --search "chore: bump version in:title" --json number --jq 'length')
+          echo "Open bump PRs found: $count"
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node.js
+        if: steps.existing.outputs.count == '0'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 20
+
+      - name: Bump version
+        if: steps.existing.outputs.count == '0'
+        id: bump
+        run: node .github/scripts/update-version.js
+
+      - name: Open pull request
+        if: steps.existing.outputs.count == '0'
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          token: ${{ secrets.GH_PAT || secrets.GITHUB_TOKEN }}
+          commit-message: "chore: bump version to ${{ steps.bump.outputs.new_version }}"
+          title: "chore: bump version"
+          branch: "chore/bump-version-${{ github.run_id }}"
+          base: main
+          add-paths: src/Client.php
+          body: |
+            Automated version bump: `${{ steps.bump.outputs.old_version }}` -> `${{ steps.bump.outputs.new_version }}`.
+
+            This pull request was opened automatically because a change was merged to `main`.
+            Merging it will tag `v${{ steps.bump.outputs.new_version }}` and publish a GitHub
+            release for that tag (see `.github/workflows/bump-version.yml`), which is what
+            Composer resolves when a consumer requires this package.
