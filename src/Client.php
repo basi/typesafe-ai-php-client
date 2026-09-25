@@ -85,7 +85,7 @@ final class Client implements ClientInterface
             $streamFactory ?? Psr17FactoryDiscovery::findStreamFactory(),
             $this->redactor,
         );
-        $this->retryPolicy = new RetryPolicy();
+        $this->retryPolicy = new RetryPolicy(maxServerDelayMilliseconds: $options->maxRetryDelayMs);
     }
 
     /**

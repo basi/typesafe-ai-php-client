@@ -184,6 +184,52 @@ final class RetryPolicyTest extends TestCase
     }
 
     #[Test]
+    public function aMaxServerDelayBelowTheServerRequestFallsBackToBackoff(): void
+    {
+        $policy = new RetryPolicy(random: static fn (): float => 0.0, maxServerDelayMilliseconds: 1000);
+
+        // The server asked for 5s, well above the 1s cap, so this must fall back to plain backoff
+        // for attempt 0 (500ms) instead of honouring the header.
+        self::assertSame(500, $policy->delayMilliseconds(0, ['retry-after-ms' => '5000']));
+    }
+
+    #[Test]
+    public function aServerDelayAtOrBelowTheMaxServerDelayIsHonoured(): void
+    {
+        $policy = new RetryPolicy(random: static fn (): float => 0.0, maxServerDelayMilliseconds: 1000);
+
+        self::assertSame(1000, $policy->delayMilliseconds(0, ['retry-after' => '1']));
+    }
+
+    #[Test]
+    public function aMaxServerDelayOfZeroAlwaysFallsBackToBackoff(): void
+    {
+        $policy = new RetryPolicy(random: static fn (): float => 0.0, maxServerDelayMilliseconds: 0);
+
+        // Even a modest 1s server delay must be rejected in favour of plain backoff for attempt 0
+        // (500ms), since a cap of 0 means a server delay is never honoured.
+        self::assertSame(500, $policy->delayMilliseconds(0, ['retry-after' => '1']));
+    }
+
+    #[Test]
+    public function aNullMaxServerDelayKeepsTheSixtySecondCeiling(): void
+    {
+        $policy = new RetryPolicy(random: static fn (): float => 0.0, maxServerDelayMilliseconds: null);
+
+        self::assertSame(60_000, $policy->delayMilliseconds(0, ['retry-after' => '60']));
+        self::assertSame(500, $policy->delayMilliseconds(0, ['retry-after' => '61']));
+    }
+
+    #[Test]
+    public function aMaxServerDelayAboveSixtySecondsCannotRaiseTheBuiltInCeiling(): void
+    {
+        $policy = new RetryPolicy(random: static fn (): float => 0.0, maxServerDelayMilliseconds: 120_000);
+
+        self::assertSame(60_000, $policy->delayMilliseconds(0, ['retry-after' => '60']));
+        self::assertSame(500, $policy->delayMilliseconds(0, ['retry-after' => '61']));
+    }
+
+    #[Test]
     public function sleepInvokesTheInjectedSleeperWithTheExactValue(): void
     {
         $calls = [];
