@@ -39,7 +39,7 @@ final class Client implements ClientInterface
      * declaration shape — `public const VERSION = '<major>.<minor>.<patch>';`, without a type —
      * so do not add a `string` type to this constant.
      */
-    public const VERSION = '0.1.4';
+    public const VERSION = '0.1.5';
 
     private readonly string $apiKey;
 
