@@ -167,13 +167,19 @@ use TypesafeAi\ClientOptions;
 $client = Client::withGuzzle($apiKey, new ClientOptions(
     baseUrl: 'https://api.typesafe.ai',
     defaultModel: 'jev-latest',   // used when a SystemOneRequest does not specify one
-    timeoutSeconds: 30,           // per-attempt total timeout
-    connectTimeoutSeconds: 5,
+    timeoutSeconds: 30,           // per-attempt total timeout; must be at least 1 (see below)
+    connectTimeoutSeconds: 5,     // must be at least 1, for the same reason
     maxRetries: 0,                // see below
     modelsMaxRetries: 2,          // retries for the read-only GET /v1/models
     retryRateLimitedPost: true,   // see below
+    maxRetryDelayMs: null,        // see below
 ));
 ```
+
+**`timeoutSeconds` and `connectTimeoutSeconds` must both be at least 1.** Guzzle treats a
+timeout of `0` as "wait indefinitely", which would silently remove any upper bound on how long a
+single call can take; `ClientOptions` rejects `0` (and any negative value) for both with an
+`\InvalidArgumentException` rather than passing it through.
 
 **`POST /v1/systemone` is not retried by default** (`maxRetries: 0`). A retried POST can be
 billed twice, and because answers are probabilistic a retry is not guaranteed to reproduce the
@@ -191,8 +197,27 @@ was processed, so retrying it cannot double-bill you. That is retried once even 
 always retries up to `modelsMaxRetries` times.
 
 When a retry does happen, this client honours the server's `retry-after-ms` or `Retry-After`
-header (seconds or an HTTP-date) when present; otherwise it backs off from 0.5s, doubling up to a
-5s cap, minus up to 25% random jitter — mirroring the official SDKs.
+header (seconds or an HTTP-date) when present, up to 60 seconds; otherwise (or beyond that
+ceiling) it backs off from 0.5s, doubling up to a 5s cap, minus up to 25% random jitter —
+mirroring the official SDKs.
+
+**`maxRetryDelayMs` lowers that 60-second ceiling**, for callers with their own hard upper bound
+on how long one call may take — for example, a queue worker whose job is killed after a fixed
+timeout. A server-specified delay longer than `maxRetryDelayMs` is not waited out; exponential
+backoff is used instead (backoff itself is always subject to its own 5s cap regardless of this
+option). `null` (the default) keeps the 60-second ceiling; `0` means a server-specified delay is
+never honoured, so every retry uses backoff.
+
+```php
+new ClientOptions(maxRetries: 1, maxRetryDelayMs: 2000);
+```
+
+For a queue worker, choose `maxRetryDelayMs` so the worst case comfortably fits inside the job
+timeout:
+
+```text
+timeoutSeconds × (maxRetries + 1) + maxRetryDelayMs < job timeout
+```
 
 ## Using an AI gateway
 
