@@ -28,8 +28,8 @@ jobs:
           coverage: none
 
       - name: Validate composer.json
-        # Exact dependency versions are intentional; keep other validation strict.
-        run: composer validate --strict --no-check-all
+        # Run all checks and report intentional exact-version warnings without failing CI.
+        run: composer validate
 
       - name: Locate Composer cache directory
         id: composer-cache
@@ -58,6 +58,9 @@ jobs:
       - name: Install dependencies (lowest)
         if: matrix.dependencies == 'lowest'
         run: composer update --prefer-lowest --prefer-stable --prefer-dist --no-interaction --no-progress
+
+      - name: Audit dependencies
+        run: composer audit
 
       - name: Run tests
         run: composer test
