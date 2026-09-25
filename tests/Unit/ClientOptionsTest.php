@@ -23,6 +23,7 @@ final class ClientOptionsTest extends TestCase
         self::assertSame(0, $options->maxRetries);
         self::assertSame(2, $options->modelsMaxRetries);
         self::assertTrue($options->retryRateLimitedPost);
+        self::assertNull($options->maxRetryDelayMs);
     }
 
     #[Test]
@@ -66,10 +67,58 @@ final class ClientOptionsTest extends TestCase
     }
 
     #[Test]
+    public function rejectsAZeroTimeoutSeconds(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        new ClientOptions(timeoutSeconds: 0);
+    }
+
+    #[Test]
+    public function acceptsATimeoutSecondsOfOne(): void
+    {
+        $options = new ClientOptions(timeoutSeconds: 1);
+
+        self::assertSame(1, $options->timeoutSeconds);
+    }
+
+    #[Test]
+    public function rejectsAZeroConnectTimeoutSeconds(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        new ClientOptions(connectTimeoutSeconds: 0);
+    }
+
+    #[Test]
+    public function acceptsAConnectTimeoutSecondsOfOne(): void
+    {
+        $options = new ClientOptions(connectTimeoutSeconds: 1);
+
+        self::assertSame(1, $options->connectTimeoutSeconds);
+    }
+
+    #[Test]
     public function rejectsNegativeMaxRetries(): void
     {
         $this->expectException(\InvalidArgumentException::class);
 
         new ClientOptions(maxRetries: -1);
+    }
+
+    #[Test]
+    public function rejectsANegativeMaxRetryDelayMs(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        new ClientOptions(maxRetryDelayMs: -1);
+    }
+
+    #[Test]
+    public function acceptsAZeroMaxRetryDelayMs(): void
+    {
+        $options = new ClientOptions(maxRetryDelayMs: 0);
+
+        self::assertSame(0, $options->maxRetryDelayMs);
     }
 }

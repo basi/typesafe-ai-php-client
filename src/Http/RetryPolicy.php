@@ -21,7 +21,10 @@ use TypesafeAi\Exception\TransportException;
  * wait prefers the server's `retry-after-ms` response header, then `Retry-After` (either an
  * integer number of seconds or an HTTP-date), unless that asks for more than 60 seconds — in which
  * case exponential backoff is used instead: 0.5s doubling on each attempt up to a 5s cap, minus up
- * to 25% random jitter.
+ * to 25% random jitter. A caller may lower that 60-second ceiling further via
+ * $maxServerDelayMilliseconds (see {@see \TypesafeAi\ClientOptions::$maxRetryDelayMs}) — for
+ * example, to bound how long a single call can take inside a job with its own hard timeout. It
+ * cannot raise the ceiling above 60 seconds.
  */
 final class RetryPolicy
 {
@@ -43,9 +46,17 @@ final class RetryPolicy
      *     `mt_rand()`-based randomness.
      * @param ?\Closure(): \DateTimeImmutable $clock Returns the current time, used to resolve an
      *     HTTP-date `Retry-After` header. Defaults to the real current time.
+     * @param ?int $maxServerDelayMilliseconds Caller-supplied ceiling on a server-specified delay,
+     *     in milliseconds. The effective ceiling is `min(60_000, $maxServerDelayMilliseconds ??
+     *     60_000)`, so this can only lower the built-in 60-second ceiling, never raise it. `null`
+     *     (the default) keeps the 60-second ceiling unchanged.
      */
-    public function __construct(?\Closure $sleeper = null, ?\Closure $random = null, ?\Closure $clock = null)
-    {
+    public function __construct(
+        ?\Closure $sleeper = null,
+        ?\Closure $random = null,
+        ?\Closure $clock = null,
+        private readonly ?int $maxServerDelayMilliseconds = null,
+    ) {
         $this->sleeper = $sleeper ?? static function (int $milliseconds): void {
             if ($milliseconds > 0) {
                 usleep($milliseconds * 1000);
@@ -84,7 +95,11 @@ final class RetryPolicy
     public function delayMilliseconds(int $attempt, array $lowercaseHeaders = []): int
     {
         $serverDelay = $this->parseServerDelayMilliseconds($lowercaseHeaders);
-        if ($serverDelay !== null && $serverDelay <= self::MAX_SERVER_DELAY_MILLISECONDS) {
+        $serverDelayCeiling = min(
+            self::MAX_SERVER_DELAY_MILLISECONDS,
+            $this->maxServerDelayMilliseconds ?? self::MAX_SERVER_DELAY_MILLISECONDS,
+        );
+        if ($serverDelay !== null && $serverDelay <= $serverDelayCeiling) {
             return $serverDelay;
         }
 
