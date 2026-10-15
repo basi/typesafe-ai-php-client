@@ -12,8 +12,9 @@ final readonly class NoulQuestion implements QuestionInterface
     /**
      * Mirrors the official SDK (0.7.5), whose question fields take JSON content rather than only
      * text: a string, a list or map of values (nested to any depth), or an object that encodes as
-     * JSON, such as a {@see \JsonSerializable}. A string must not be empty; an array or an object
-     * is sent as it is, and the API decides whether it makes sense.
+     * JSON, such as a {@see \JsonSerializable} or an {@see \TypesafeAi\Request\Image}. A string
+     * $instructions must not be empty; an array or an object, and any $whenTrue or $whenFalse, is
+     * sent as it is, and the API decides whether it makes sense.
      *
      * @param string|array<array-key, mixed>|object $instructions The yes/no question or statement
      *     to evaluate.

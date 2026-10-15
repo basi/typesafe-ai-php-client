@@ -35,7 +35,8 @@ final class SystemOneRequest implements \JsonSerializable
      * keyed "1" is legitimate and its key genuinely is an int by the time this constructor sees
      * it.
      *
-     * @param mixed $state Content all questions in this request refer to.
+     * @param mixed $state Content all questions in this request refer to. An {@see Image} anywhere
+     *     in it, or in a question, is uploaded with the request.
      * @param array<array-key, mixed> $questions Non-empty map of question name to question. The
      *     response uses these names to identify the answers.
      * @param ?string $model Model name or alias. Omitted from the request payload when null; a

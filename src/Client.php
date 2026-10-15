@@ -16,6 +16,7 @@ use TypesafeAi\Exception\TypesafeAiException;
 use TypesafeAi\Http\GuzzleTransportFactory;
 use TypesafeAi\Http\Redactor;
 use TypesafeAi\Http\RetryPolicy;
+use TypesafeAi\Http\SystemOneBody;
 use TypesafeAi\Http\Transport;
 use TypesafeAi\Request\Questions;
 use TypesafeAi\Request\SystemOneRequest;
@@ -106,11 +107,15 @@ final class Client implements ClientInterface
             ? $request
             : $request->withModel($this->options->defaultModel);
 
+        // The body is built, and every image read, before the first attempt: an image that cannot
+        // be read throws here, with nothing sent, and every retry sends the very same bytes.
+        [$contentType, $body] = SystemOneBody::encode($effectiveRequest);
+
         return $this->sendWithRetry(
             'POST',
             $this->options->baseUrl . '/v1/systemone',
-            $this->requestHeaders($effectiveRequest->extraHeaders(), self::JSON_CONTENT_TYPE),
-            json_encode($effectiveRequest, JSON_THROW_ON_ERROR),
+            $this->requestHeaders($effectiveRequest->extraHeaders(), $contentType),
+            $body,
             static fn (string $responseBody, ?string $requestId): SystemOneResponse
                 => SystemOneResponse::fromJson($responseBody, $requestId),
         );
