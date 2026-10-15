@@ -6,9 +6,11 @@ namespace TypesafeAi\Tests\Unit\Request;
 
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
+use TypesafeAi\Request\Image;
 use TypesafeAi\Request\Question\ChoiceQuestion;
 use TypesafeAi\Request\Question\NoulQuestion;
 use TypesafeAi\Request\Questions;
+use TypesafeAi\Tests\Support\Samples;
 
 final class QuestionsTest extends TestCase
 {
@@ -159,6 +161,32 @@ final class QuestionsTest extends TestCase
             JSON,
             $encoded,
         );
+    }
+
+    #[Test]
+    public function toRequestPassesTheNamedImagesOn(): void
+    {
+        $photo = Image::fromBytes(Samples::PNG);
+
+        $request = Questions::create()
+            ->noul('Is <photo> damaged?')
+            ->toRequest('some state', assets: ['<photo>' => $photo]);
+
+        self::assertSame(['<photo>' => $photo], $request->assets());
+    }
+
+    #[Test]
+    public function toRequestPassesTheNamedImagesAndTheExtraHeadersOnTogether(): void
+    {
+        $photo = Image::fromBytes(Samples::PNG);
+
+        $request = Questions::create()
+            ->noul('Is <photo> damaged?')
+            ->toRequest('some state', 'jev-preview', ['<photo>' => $photo], ['X-Tenant' => '42']);
+
+        self::assertSame('jev-preview', $request->model());
+        self::assertSame(['<photo>' => $photo], $request->assets());
+        self::assertSame(['X-Tenant' => '42'], $request->extraHeaders());
     }
 
     #[Test]

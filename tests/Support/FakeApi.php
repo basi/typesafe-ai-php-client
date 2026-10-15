@@ -47,18 +47,22 @@ final class FakeApi
 
     /**
      * A request whose only question is a noul question named `q`.
+     *
+     * @param array<array-key, mixed> $assets The request's named images.
      */
-    public static function request(mixed $state): SystemOneRequest
+    public static function request(mixed $state, array $assets = []): SystemOneRequest
     {
-        return new SystemOneRequest($state, ['q' => new NoulQuestion('Is it damaged?')]);
+        return new SystemOneRequest($state, ['q' => new NoulQuestion('Is it damaged?')], assets: $assets);
     }
 
     /**
      * Sends {@see self::request()} for $state.
+     *
+     * @param array<array-key, mixed> $assets The request's named images.
      */
-    public function ask(mixed $state): SystemOneResponse
+    public function ask(mixed $state, array $assets = []): SystemOneResponse
     {
-        return $this->client->systemOne(self::request($state));
+        return $this->client->systemOne(self::request($state, $assets));
     }
 
     /**

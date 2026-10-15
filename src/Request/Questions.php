@@ -144,6 +144,8 @@ final class Questions implements \Countable
     /**
      * Build a {@see SystemOneRequest} from the questions declared so far.
      *
+     * @param array<array-key, mixed> $assets Images with a name of your choosing, by name; see
+     *     {@see SystemOneRequest::__construct()}.
      * @param array<array-key, mixed> $extraHeaders Headers for this request only; see
      *     {@see SystemOneRequest::__construct()}.
      *
@@ -151,9 +153,13 @@ final class Questions implements \Countable
      *     rejects an empty question map), or for any other reason {@see SystemOneRequest} rejects
      *     its arguments.
      */
-    public function toRequest(mixed $state, ?string $model = null, array $extraHeaders = []): SystemOneRequest
-    {
-        return new SystemOneRequest($state, $this->questions, $model, extraHeaders: $extraHeaders);
+    public function toRequest(
+        mixed $state,
+        ?string $model = null,
+        array $assets = [],
+        array $extraHeaders = [],
+    ): SystemOneRequest {
+        return new SystemOneRequest($state, $this->questions, $model, $assets, $extraHeaders);
     }
 
     public function count(): int

@@ -128,6 +128,8 @@ final class Client implements ClientInterface
      * @see Questions for building $questions.
      * @see TypedSystemOneResponse for how the answers are decoded and accessed.
      *
+     * @param array<array-key, mixed> $assets Images with a name of your choosing, by name; see
+     *     {@see SystemOneRequest::__construct()}.
      * @param array<array-key, mixed> $extraHeaders Headers for this request only; see
      *     {@see SystemOneRequest::__construct()}.
      *
@@ -137,10 +139,11 @@ final class Client implements ClientInterface
         mixed $state,
         Questions $questions,
         ?string $model = null,
+        array $assets = [],
         array $extraHeaders = [],
     ): TypedSystemOneResponse {
         return TypedSystemOneResponse::decode(
-            $this->systemOne($questions->toRequest($state, $model, $extraHeaders)),
+            $this->systemOne($questions->toRequest($state, $model, $assets, $extraHeaders)),
             $questions,
         );
     }

@@ -20,9 +20,17 @@ final class SystemOneBodyTest extends TestCase
 {
     use UsesTemporaryDirectory;
 
-    private static function request(mixed $state, ?NoulQuestion $question = null): SystemOneRequest
-    {
-        return new SystemOneRequest($state, ['q' => $question ?? new NoulQuestion('Is it damaged?')], 'vision');
+    /**
+     * @param array<array-key, mixed> $assets
+     */
+    private static function request(
+        mixed $state,
+        ?NoulQuestion $question = null,
+        array $assets = [],
+    ): SystemOneRequest {
+        $questions = ['q' => $question ?? new NoulQuestion('Is it damaged?')];
+
+        return new SystemOneRequest($state, $questions, 'vision', $assets);
     }
 
     /**
@@ -296,5 +304,188 @@ final class SystemOneBodyTest extends TestCase
         $this->expectExceptionMessage("Asset '{$image}': Image data is empty.");
 
         SystemOneBody::encode(self::request($image));
+    }
+
+    #[Test]
+    public function aNamedImageIsWrittenAsItsNameWhereverItIsPlacedAndUploadedOnce(): void
+    {
+        $photo = Image::fromBytes(Samples::PNG);
+        $question = new NoulQuestion(['Is it damaged?', $photo]);
+        $request = self::request(['Compare <photo> with', $photo], $question, ['<photo>' => $photo]);
+
+        $decoded = RequestBody::decode(self::sent(SystemOneBody::encode($request)));
+
+        self::assertSame(['Compare <photo> with', '<photo>'], $decoded['state']);
+        self::assertSame(
+            ['q' => ['type' => 'noul', 'instructions' => ['Is it damaged?', '<photo>']]],
+            $decoded['questions'],
+        );
+        self::assertSame(
+            ['<photo>' => ['type' => 'image', 'content_type' => 'image/png', 'data' => Samples::PNG]],
+            $decoded['assets'],
+        );
+    }
+
+    #[Test]
+    public function uploadsTheNamedImagesBeforeTheOnesThatAreOnlyPlaced(): void
+    {
+        $named = Image::fromBytes('named');
+        $placed = Image::fromBytes('placed');
+
+        $decoded = RequestBody::decode(self::sent(SystemOneBody::encode(
+            self::request([$placed], assets: ['<named>' => $named]),
+        )));
+
+        self::assertIsArray($decoded['assets']);
+        self::assertSame(['<named>', (string) $placed], array_keys($decoded['assets']));
+    }
+
+    #[Test]
+    public function uploadsANamedImageThatNothingRefersTo(): void
+    {
+        $photo = Image::fromBytes(Samples::PNG);
+
+        $decoded = RequestBody::decode(self::sent(SystemOneBody::encode(
+            self::request('Nothing to see here.', assets: ['<unused>' => $photo]),
+        )));
+
+        self::assertIsArray($decoded['assets']);
+        self::assertSame(['<unused>'], array_keys($decoded['assets']));
+        self::assertSame('Nothing to see here.', $decoded['state']);
+    }
+
+    #[Test]
+    public function uploadsAnImageOncePerNameAndWritesItAsItsLastNameWhereItIsPlaced(): void
+    {
+        $photo = Image::fromBytes(Samples::PNG);
+
+        $encoded = SystemOneBody::encode(self::request([$photo], assets: ['<a>' => $photo, '<b>' => $photo]));
+
+        $decoded = RequestBody::decode(self::sent($encoded));
+        self::assertSame(['<b>'], $decoded['state']);
+        self::assertIsArray($decoded['assets']);
+        self::assertSame(['<a>', '<b>'], array_keys($decoded['assets']));
+        self::assertSame(2, substr_count($encoded[1], Samples::PNG));
+        self::assertSame(['request', 'asset-0', 'asset-1'], array_keys(RequestBody::parts(self::sent($encoded))));
+    }
+
+    #[Test]
+    public function aNamedImageWhoseReferenceTheTextMentionsIsAlsoUploadedUnderThatReference(): void
+    {
+        $photo = Image::fromBytes(Samples::PNG);
+
+        $decoded = RequestBody::decode(self::sent(SystemOneBody::encode(
+            self::request("<photo> is {$photo}", assets: ['<photo>' => $photo]),
+        )));
+
+        self::assertSame("<photo> is {$photo}", $decoded['state']);
+        self::assertIsArray($decoded['assets']);
+        self::assertSame(['<photo>', (string) $photo], array_keys($decoded['assets']));
+        self::assertSame(
+            $decoded['assets']['<photo>'] ?? null,
+            $decoded['assets'][(string) $photo] ?? null,
+        );
+    }
+
+    #[Test]
+    public function aNamedImageWhoseReferenceIsMentionedTwiceIsUploadedUnderItOnce(): void
+    {
+        $photo = Image::fromBytes(Samples::PNG);
+
+        $decoded = RequestBody::decode(self::sent(SystemOneBody::encode(
+            self::request(["{$photo} and {$photo}", "{$photo}"], assets: ['<photo>' => $photo]),
+        )));
+
+        self::assertIsArray($decoded['assets']);
+        self::assertSame(['<photo>', (string) $photo], array_keys($decoded['assets']));
+    }
+
+    #[Test]
+    public function keepsNamesThatLookLikeNumbersAsKeysOfAnObjectInTheOrderGiven(): void
+    {
+        $first = Image::fromBytes('first');
+        $second = Image::fromBytes('second');
+        // PHP leaves "007" and "1.5" as strings: they are names like any other.
+        $request = self::request([$first, $second], assets: ['007' => $first, '1.5' => $second]);
+
+        $parts = RequestBody::parts(self::sent(SystemOneBody::encode($request)));
+
+        self::assertStringEndsWith(
+            ',"assets":{"007":{"type":"image","part":"asset-0"},"1.5":{"type":"image","part":"asset-1"}}}',
+            $parts['request']['content'],
+        );
+        self::assertStringContainsString('"state":["007","1.5"]', $parts['request']['content']);
+        self::assertSame('first', $parts['asset-0']['content']);
+        self::assertSame('second', $parts['asset-1']['content']);
+    }
+
+    #[Test]
+    public function escapesANameThatNeedsIt(): void
+    {
+        $name = "photo \"1\" / caf\u{E9} <a>";
+        $photo = Image::fromBytes(Samples::PNG);
+
+        $decoded = RequestBody::decode(self::sent(SystemOneBody::encode(
+            self::request($photo, assets: [$name => $photo]),
+        )));
+
+        self::assertSame($name, $decoded['state']);
+        self::assertIsArray($decoded['assets']);
+        self::assertSame([$name], array_keys($decoded['assets']));
+    }
+
+    #[Test]
+    public function reportsAnUnreadableNamedImageByItsNameNotItsReference(): void
+    {
+        $path = $this->temporaryPath('missing.png');
+        $photo = Image::fromPath($path);
+
+        try {
+            SystemOneBody::encode(self::request([$photo], assets: ['<photo>' => $photo]));
+            self::fail('Expected an exception.');
+        } catch (AssetException $exception) {
+            self::assertSame(
+                "Asset '<photo>': Image file '{$path}' could not be read: No such file or directory.",
+                $exception->getMessage(),
+            );
+        }
+    }
+
+    #[Test]
+    public function reportsTheFirstUnreadableNamedImageInTheOrderGiven(): void
+    {
+        $fine = Image::fromBytes(Samples::PNG);
+        $first = Image::fromPath($this->temporaryPath('first-missing.png'));
+        $second = Image::fromPath($this->temporaryPath('second-missing.png'));
+
+        $this->expectException(AssetException::class);
+        $this->expectExceptionMessage("Asset '<first>': Image file ");
+
+        SystemOneBody::encode(self::request(
+            'state',
+            assets: ['<fine>' => $fine, '<first>' => $first, '<second>' => $second],
+        ));
+    }
+
+    #[Test]
+    public function reportsAnImageWithSeveralNamesByItsFirstName(): void
+    {
+        $missing = Image::fromPath($this->temporaryPath('missing.png'));
+
+        $this->expectException(AssetException::class);
+        $this->expectExceptionMessage("Asset '<a>': Image file ");
+
+        SystemOneBody::encode(self::request('state', assets: ['<a>' => $missing, '<b>' => $missing]));
+    }
+
+    #[Test]
+    public function aRequestWithOnlyAnEmptyAssetsMapIsPlainJson(): void
+    {
+        $request = self::request('state', assets: []);
+
+        [$contentType, $body] = SystemOneBody::encode($request);
+
+        self::assertSame('application/json', $contentType);
+        self::assertStringNotContainsString('assets', $body);
     }
 }

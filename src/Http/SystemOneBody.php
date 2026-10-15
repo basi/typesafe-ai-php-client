@@ -39,28 +39,35 @@ final class SystemOneBody
      * Encodes $request, reading every image that has to be sent. The body is built once, so a retry
      * sends exactly the same bytes, boundary included.
      *
-     * The images sent, in this order, are those placed in the request's content, in the order they
-     * first appear in the encoded JSON.
+     * The images sent, in this order, are those named in the request's `assets`, in the order
+     * given, then those whose reference appears in the encoded JSON, in the order they first
+     * appear: an image placed in the content, or one whose reference the text mentions. A
+     * reference to an image that is not one of those is just text.
      *
      * @return array{string, string} The `Content-Type` header value and the body.
      *
      * @throws \JsonException if the request cannot be encoded as JSON.
      * @throws AssetException if an image cannot be read. The message names the image by the name it
-     *     has in the request: its reference, when it was placed in the content.
+     *     has in the request: its alias, or its reference when it has none.
      */
     public static function encode(SystemOneRequest $request): array
     {
-        [$json, $found] = References::encode($request->jsonSerialize());
+        // A named image is written as its name wherever it is placed; any other is written as its
+        // reference and reported in $found.
+        [$json, $found] = References::encode($request->jsonSerialize(), $request->assets());
 
         /** @var array<array-key, Image> $pending The images to upload, by name, in order. */
-        $pending = [];
+        $pending = $request->assets();
 
-        // A reference is JSON-safe ASCII, so one scan of the encoded body finds it in every string
-        // — including text that mentions the reference of an image placed elsewhere in the request.
-        if ($found !== [] && preg_match_all(self::REFERENCE_PATTERN, $json, $matches) > 0) {
+        // The references the body may mention: that of a named image, which text can hold, for
+        // example from an interpolated string, and that of an image placed in the content.
+        $known = array_replace(self::indexedByReference($pending), $found);
+
+        // A reference is JSON-safe ASCII, so one scan of the encoded body finds it in every string.
+        if ($known !== [] && preg_match_all(self::REFERENCE_PATTERN, $json, $matches) > 0) {
             foreach ($matches[0] as $reference) {
-                if (isset($found[$reference]) && !array_key_exists($reference, $pending)) {
-                    $pending[$reference] = $found[$reference];
+                if (isset($known[$reference]) && !array_key_exists($reference, $pending)) {
+                    $pending[$reference] = $known[$reference];
                 }
             }
         }
@@ -82,7 +89,7 @@ final class SystemOneBody
             // part before the image is read. An image with two names is sent twice: the API wants
             // each part claimed by exactly one asset.
             $partName = 'asset-' . count($parts);
-            // Assigned by key, not merged: array_merge() would renumber an integer name.
+            // Assigned by key rather than merged, so that every entry keeps its name and its place.
             $entries[$name] = ['type' => 'image', 'part' => $partName];
             $parts[] = [
                 'name' => $partName,
@@ -100,5 +107,20 @@ final class SystemOneBody
             ['name' => 'request', 'contentType' => self::JSON_CONTENT_TYPE, 'content' => $body, 'filename' => null],
             ...$parts,
         ]);
+    }
+
+    /**
+     * @param array<array-key, Image> $images
+     *
+     * @return array<string, Image>
+     */
+    private static function indexedByReference(array $images): array
+    {
+        $indexed = [];
+        foreach ($images as $image) {
+            $indexed[(string) $image] = $image;
+        }
+
+        return $indexed;
     }
 }

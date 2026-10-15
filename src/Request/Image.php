@@ -19,6 +19,9 @@ use TypesafeAi\Uuid;
  * `multipart/form-data` request, with the JSON body naming its part, instead of as base64 text
  * inside the JSON. A request with no image is still a plain JSON request, byte for byte.
  *
+ * To refer to an image from inside a text, give it a name in the request's `assets`
+ * ({@see SystemOneRequest::__construct()}) and write the name in the text.
+ *
  * The API accepts images only from callers that opt in to this experimental feature with the
  * request header `TypeSafe-Danger-Zone-Images: true`. This client does not add that header: set it
  * with {@see \TypesafeAi\ClientOptions::$headers} or {@see SystemOneRequest::extraHeaders()}.
@@ -158,7 +161,8 @@ final class Image implements \JsonSerializable, \Stringable
      * The unique reference to this image, for putting it inside text, such as an interpolated
      * string: `"Compare {$image} with the listing."`. It looks like
      * `<image:0c0ea0b06f1641dd8e4b64f2cbbd4c25>` and is the same string the image becomes in the
-     * request's JSON.
+     * request's JSON. A reference in text only stands for the image when the request also holds
+     * the image: placed in its content, or named in its `assets`. Otherwise it is just text.
      */
     public function __toString(): string
     {
