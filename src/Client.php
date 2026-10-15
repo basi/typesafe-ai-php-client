@@ -41,6 +41,10 @@ final class Client implements ClientInterface
      */
     public const VERSION = '0.1.6';
 
+    private const string JSON_CONTENT_TYPE = 'application/json';
+
+    private const string RETRY_COUNT_HEADER = 'X-TypeSafe-Retry-Count';
+
     private readonly string $apiKey;
 
     private readonly Redactor $redactor;
@@ -100,14 +104,13 @@ final class Client implements ClientInterface
     {
         $effectiveRequest = $request->model() !== null
             ? $request
-            : new SystemOneRequest($request->state(), $request->questions(), $this->options->defaultModel);
-
-        $body = json_encode($effectiveRequest, JSON_THROW_ON_ERROR);
+            : $request->withModel($this->options->defaultModel);
 
         return $this->sendWithRetry(
             'POST',
             $this->options->baseUrl . '/v1/systemone',
-            $body,
+            $this->requestHeaders($effectiveRequest->extraHeaders(), self::JSON_CONTENT_TYPE),
+            json_encode($effectiveRequest, JSON_THROW_ON_ERROR),
             static fn (string $responseBody, ?string $requestId): SystemOneResponse
                 => SystemOneResponse::fromJson($responseBody, $requestId),
         );
@@ -120,11 +123,21 @@ final class Client implements ClientInterface
      * @see Questions for building $questions.
      * @see TypedSystemOneResponse for how the answers are decoded and accessed.
      *
+     * @param array<array-key, mixed> $extraHeaders Headers for this request only; see
+     *     {@see SystemOneRequest::__construct()}.
+     *
      * @throws TypesafeAiException
      */
-    public function evaluate(mixed $state, Questions $questions, ?string $model = null): TypedSystemOneResponse
-    {
-        return TypedSystemOneResponse::decode($this->systemOne($questions->toRequest($state, $model)), $questions);
+    public function evaluate(
+        mixed $state,
+        Questions $questions,
+        ?string $model = null,
+        array $extraHeaders = [],
+    ): TypedSystemOneResponse {
+        return TypedSystemOneResponse::decode(
+            $this->systemOne($questions->toRequest($state, $model, $extraHeaders)),
+            $questions,
+        );
     }
 
     public function models(): array
@@ -132,6 +145,7 @@ final class Client implements ClientInterface
         return $this->sendWithRetry(
             'GET',
             $this->options->baseUrl . '/v1/models',
+            $this->requestHeaders([], null),
             null,
             static fn (string $responseBody): array => ModelCard::listFromJson($responseBody),
         );
@@ -140,12 +154,14 @@ final class Client implements ClientInterface
     /**
      * @template T
      *
+     * @param array<string, string> $headers Headers of every attempt, as built by
+     *     {@see self::requestHeaders()}; the retry count is added here, per attempt.
      * @param \Closure(string, ?string): T $hydrate Builds the return value from a 2xx response's
      *     raw body and request id.
      *
      * @return T
      */
-    private function sendWithRetry(string $method, string $url, ?string $body, \Closure $hydrate): mixed
+    private function sendWithRetry(string $method, string $url, array $headers, ?string $body, \Closure $hydrate): mixed
     {
         $attempt = 0;
 
@@ -154,7 +170,7 @@ final class Client implements ClientInterface
                 $response = $this->transport->send(
                     $method,
                     $url,
-                    $this->headersForAttempt($method, $attempt),
+                    $attempt > 0 ? [...$headers, self::RETRY_COUNT_HEADER => (string) $attempt] : $headers,
                     $body,
                 );
             } catch (TransportException $exception) {
@@ -225,24 +241,53 @@ final class Client implements ClientInterface
     }
 
     /**
+     * The headers of one call, built once and reused by every attempt of it.
+     *
+     * Mirrors the official SDK (0.7.5). Header names are compared without regard to case, and
+     * the later of these wins: the client-wide {@see ClientOptions::$headers}; then the call's
+     * own headers; then the headers this client always sets (`Authorization`, `Accept`,
+     * `User-Agent`, `X-TypeSafe-SDK` and `X-TypeSafe-Runtime`), so that a caller cannot replace
+     * the credentials or the client's identification; then `Content-Type`, when the call has a
+     * body. A `X-TypeSafe-Retry-Count` supplied by the caller is dropped, because the client adds
+     * the real one to each retry itself.
+     *
+     * @param array<string, string> $extra The call's own headers.
+     * @param ?string $contentType The content type of the call's body; null for a call without one.
+     *
      * @return array<string, string>
      */
-    private function headersForAttempt(string $method, int $attempt): array
+    private function requestHeaders(array $extra, ?string $contentType): array
     {
-        $headers = [
+        /** @var array<string, array{string, string}> $merged Lower-case name to [name, value]. */
+        $merged = [];
+
+        foreach ([$this->options->headers, $extra] as $callerHeaders) {
+            foreach ($callerHeaders as $name => $value) {
+                $merged[strtolower($name)] = [$name, $value];
+            }
+        }
+
+        unset($merged[strtolower(self::RETRY_COUNT_HEADER)]);
+
+        $clientHeaders = [
             'Authorization' => 'Bearer ' . $this->apiKey,
-            'Accept' => 'application/json',
+            'Accept' => self::JSON_CONTENT_TYPE,
             'User-Agent' => self::userAgent(),
             'X-TypeSafe-SDK' => self::userAgent(),
             'X-TypeSafe-Runtime' => 'php/' . PHP_VERSION,
         ];
 
-        if ($method === 'POST') {
-            $headers['Content-Type'] = 'application/json';
+        if ($contentType !== null) {
+            $clientHeaders['Content-Type'] = $contentType;
         }
 
-        if ($attempt > 0) {
-            $headers['X-TypeSafe-Retry-Count'] = (string) $attempt;
+        foreach ($clientHeaders as $name => $value) {
+            $merged[strtolower($name)] = [$name, $value];
+        }
+
+        $headers = [];
+        foreach ($merged as [$name, $value]) {
+            $headers[$name] = $value;
         }
 
         return $headers;

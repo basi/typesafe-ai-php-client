@@ -126,4 +126,82 @@ final class SystemOneRequestTest extends TestCase
 
         new SystemOneRequest(null, ['q' => new NoulQuestion('Is this spam?')]);
     }
+
+    #[Test]
+    public function hasNoExtraHeadersByDefault(): void
+    {
+        $request = new SystemOneRequest('state', ['q' => new NoulQuestion('Is this spam?')]);
+
+        self::assertSame([], $request->extraHeaders());
+    }
+
+    #[Test]
+    public function keepsTheExtraHeadersOutOfThePayload(): void
+    {
+        $request = new SystemOneRequest(
+            'state',
+            ['q' => new NoulQuestion('Is this spam?')],
+            extraHeaders: ['X-Tenant' => '42'],
+        );
+
+        self::assertSame(['X-Tenant' => '42'], $request->extraHeaders());
+        self::assertStringNotContainsString('X-Tenant', json_encode($request, JSON_THROW_ON_ERROR));
+    }
+
+    #[Test]
+    public function rejectsAnInvalidExtraHeaderName(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessageMatches('/^extraHeaders keys must be valid HTTP header names/');
+
+        new SystemOneRequest('state', ['q' => new NoulQuestion('Is this spam?')], extraHeaders: ['Bad Name' => 'v']);
+    }
+
+    #[Test]
+    public function rejectsAnExtraHeaderValueWithALineBreak(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessageMatches('/^extraHeaders values must be strings without control characters/');
+
+        new SystemOneRequest('state', ['q' => new NoulQuestion('Is this spam?')], extraHeaders: ['X-A' => "1\n2"]);
+    }
+
+    #[Test]
+    public function withModelReturnsACopyThatKeepsEverythingElse(): void
+    {
+        $question = new NoulQuestion('Is this spam?');
+        $request = new SystemOneRequest(
+            ['a' => 1],
+            ['q' => $question],
+            'jev-latest',
+            extraHeaders: ['X-Tenant' => '42'],
+        );
+
+        $copy = $request->withModel('jev-preview');
+
+        self::assertNotSame($request, $copy);
+        self::assertSame('jev-preview', $copy->model());
+        self::assertSame('jev-latest', $request->model());
+        self::assertSame(['a' => 1], $copy->state());
+        self::assertSame(['q' => $question], $copy->questions());
+        self::assertSame(['X-Tenant' => '42'], $copy->extraHeaders());
+    }
+
+    #[Test]
+    public function withModelFillsInAMissingModel(): void
+    {
+        $request = new SystemOneRequest('state', ['q' => new NoulQuestion('Is this spam?')]);
+
+        self::assertSame('jev-preview', $request->withModel('jev-preview')->model());
+    }
+
+    #[Test]
+    public function withModelRejectsAnEmptyModel(): void
+    {
+        $request = new SystemOneRequest('state', ['q' => new NoulQuestion('Is this spam?')]);
+
+        $this->expectException(\InvalidArgumentException::class);
+
+        $request->withModel('  ');
+    }
 }

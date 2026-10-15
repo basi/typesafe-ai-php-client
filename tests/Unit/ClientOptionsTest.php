@@ -24,6 +24,33 @@ final class ClientOptionsTest extends TestCase
         self::assertSame(2, $options->modelsMaxRetries);
         self::assertTrue($options->retryRateLimitedPost);
         self::assertNull($options->maxRetryDelayMs);
+        self::assertSame([], $options->headers);
+    }
+
+    #[Test]
+    public function keepsTheClientWideHeaders(): void
+    {
+        $options = new ClientOptions(headers: ['X-Tenant' => '42', 'x-team' => 'billing']);
+
+        self::assertSame(['X-Tenant' => '42', 'x-team' => 'billing'], $options->headers);
+    }
+
+    #[Test]
+    public function rejectsAnInvalidHeaderName(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessageMatches('/^headers keys must be valid HTTP header names/');
+
+        new ClientOptions(headers: ['Bad Name' => 'v']);
+    }
+
+    #[Test]
+    public function rejectsAHeaderValueWithALineBreak(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessageMatches('/^headers values must be strings without control characters/');
+
+        new ClientOptions(headers: ['X-Tenant' => "42\r\nX-Injected: 1"]);
     }
 
     #[Test]

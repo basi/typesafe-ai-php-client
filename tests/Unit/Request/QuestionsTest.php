@@ -125,6 +125,16 @@ final class QuestionsTest extends TestCase
     }
 
     #[Test]
+    public function toRequestPassesTheExtraHeadersOn(): void
+    {
+        $request = Questions::create()
+            ->noul('Is this urgent?')
+            ->toRequest('some state', extraHeaders: ['X-Tenant' => '42']);
+
+        self::assertSame(['X-Tenant' => '42'], $request->extraHeaders());
+    }
+
+    #[Test]
     public function toRequestEncodesQuestionsAsAnObjectInDeclarationOrder(): void
     {
         $questions = Questions::create()
