@@ -366,4 +366,85 @@ final class SystemOneResponseTest extends TestCase
 
         self::assertNull($response->requestId());
     }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function dataWithEveryKindOfAnswer(): array
+    {
+        $data = self::validData();
+        $data['answers'] = [
+            'dog' => [
+                'type' => 'box',
+                'box' => ['top' => 0.1, 'bottom' => 0.9, 'left' => 0.2, 'right' => 0.8],
+                'confidence' => null,
+            ],
+            'spam' => ['type' => 'noul', 'noul' => 0.1],
+            'mystery' => ['type' => 'future-type', 'future_field' => 1],
+            'tone' => [
+                'type' => 'choice',
+                'choice' => 'calm',
+                'confidence' => 0.8,
+                'probabilities' => ['calm' => 0.8, 'angry' => 0.2],
+            ],
+            'urgent' => ['type' => 'noul', 'noul' => 0.9],
+            'severity' => [
+                'type' => 'score',
+                'score' => 1.0,
+                'confidence' => 0.7,
+                'legend' => ['0' => 'low', '1' => 'high'],
+                'probabilities' => ['0' => 0.3, '1' => 0.7],
+            ],
+            'cat' => [
+                'type' => 'box',
+                'box' => ['top' => 0.0, 'bottom' => 0.5, 'left' => 0.0, 'right' => 0.5],
+                'confidence' => 0.4,
+            ],
+        ];
+
+        return $data;
+    }
+
+    #[Test]
+    public function groupsTheAnswersByTypeKeepingTheirNamesAndTheirOrder(): void
+    {
+        $response = SystemOneResponse::fromJson(json_encode(self::dataWithEveryKindOfAnswer(), JSON_THROW_ON_ERROR));
+
+        self::assertSame(['spam', 'urgent'], array_keys($response->nouls()));
+        self::assertSame(['tone'], array_keys($response->choices()));
+        self::assertSame(['severity'], array_keys($response->scores()));
+        self::assertSame(['dog', 'cat'], array_keys($response->boxes()));
+    }
+
+    #[Test]
+    public function theGroupsHoldTheSameObjectsAsAnswers(): void
+    {
+        $response = SystemOneResponse::fromJson(json_encode(self::dataWithEveryKindOfAnswer(), JSON_THROW_ON_ERROR));
+
+        self::assertSame($response->answer('urgent'), $response->nouls()['urgent']);
+        self::assertSame($response->answer('tone'), $response->choices()['tone']);
+        self::assertSame($response->answer('severity'), $response->scores()['severity']);
+        self::assertSame($response->answer('cat'), $response->boxes()['cat']);
+        self::assertCount(7, $response->answers());
+    }
+
+    #[Test]
+    public function anAnswerOfATypeThisClientDoesNotKnowIsInNoGroup(): void
+    {
+        $response = SystemOneResponse::fromJson(json_encode(self::dataWithEveryKindOfAnswer(), JSON_THROW_ON_ERROR));
+
+        $grouped = [...$response->nouls(), ...$response->choices(), ...$response->scores(), ...$response->boxes()];
+
+        self::assertArrayNotHasKey('mystery', $grouped);
+        self::assertCount(6, $grouped);
+    }
+
+    #[Test]
+    public function aGroupWithoutAnswersIsEmpty(): void
+    {
+        $response = SystemOneResponse::fromJson(self::validBody());
+
+        self::assertSame([], $response->boxes());
+        self::assertSame(['billing'], array_keys($response->nouls()));
+    }
 }
