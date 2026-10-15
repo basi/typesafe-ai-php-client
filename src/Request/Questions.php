@@ -52,11 +52,16 @@ final class Questions implements \Countable
 
     /**
      * Add a {@see NoulQuestion}. See {@see self::add()} for how $name is assigned.
+     *
+     * @param string|array<array-key, mixed>|object $instructions Text or JSON content; see
+     *     {@see NoulQuestion::__construct()}.
+     * @param string|array<array-key, mixed>|object|null $whenTrue
+     * @param string|array<array-key, mixed>|object|null $whenFalse
      */
     public function noul(
-        string $instructions,
-        ?string $whenTrue = null,
-        ?string $whenFalse = null,
+        string|array|object $instructions,
+        string|array|object|null $whenTrue = null,
+        string|array|object|null $whenFalse = null,
         ?string $name = null,
     ): self {
         return $this->add(new NoulQuestion($instructions, $whenTrue, $whenFalse), $name);
@@ -65,9 +70,11 @@ final class Questions implements \Countable
     /**
      * Add a {@see ChoiceQuestion}. See {@see self::add()} for how $name is assigned.
      *
-     * @param array<string, ?string> $options
+     * @param string|array<array-key, mixed>|object $instructions Text or JSON content; see
+     *     {@see ChoiceQuestion::__construct()}.
+     * @param array<string, string|array<array-key, mixed>|object|null> $options
      */
-    public function choice(string $instructions, array $options, ?string $name = null): self
+    public function choice(string|array|object $instructions, array $options, ?string $name = null): self
     {
         return $this->add(new ChoiceQuestion($instructions, $options), $name);
     }
@@ -75,9 +82,11 @@ final class Questions implements \Countable
     /**
      * Add a {@see ScoreQuestion}. See {@see self::add()} for how $name is assigned.
      *
-     * @param list<string> $levels
+     * @param string|array<array-key, mixed>|object $instructions Text or JSON content; see
+     *     {@see ScoreQuestion::__construct()}.
+     * @param list<string|array<array-key, mixed>|object> $levels
      */
-    public function score(string $instructions, array $levels, ?string $name = null): self
+    public function score(string|array|object $instructions, array $levels, ?string $name = null): self
     {
         return $this->add(new ScoreQuestion($instructions, $levels), $name);
     }

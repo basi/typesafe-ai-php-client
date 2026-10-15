@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace TypesafeAi\Tests\Unit\Request\Question;
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use TypesafeAi\Limits;
@@ -41,6 +42,63 @@ final class ScoreQuestionTest extends TestCase
         $decoded = json_decode($encoded, true, 512, JSON_THROW_ON_ERROR);
         self::assertIsArray($decoded);
         self::assertIsList($decoded['criteria']);
+    }
+
+    #[Test]
+    public function acceptsJsonContentForTheInstructionsAndTheLevels(): void
+    {
+        $question = new ScoreQuestion(
+            ['task' => 'Rate the urgency.'],
+            [
+                'Can wait',
+                ['meaning' => 'Needs attention soon', 'examples' => ['by Friday']],
+                (object) ['meaning' => 'Needs attention today'],
+                ['listed', 'level'],
+            ],
+        );
+
+        $encoded = json_encode($question, JSON_THROW_ON_ERROR);
+
+        self::assertJsonStringEqualsJsonString(
+            <<<'JSON'
+            {
+                "type": "score",
+                "instructions": {"task": "Rate the urgency."},
+                "criteria": [
+                    "Can wait",
+                    {"meaning": "Needs attention soon", "examples": ["by Friday"]},
+                    {"meaning": "Needs attention today"},
+                    ["listed", "level"]
+                ]
+            }
+            JSON,
+            $encoded,
+        );
+        $decoded = json_decode($encoded, true, 512, JSON_THROW_ON_ERROR);
+        self::assertIsArray($decoded);
+        self::assertIsList($decoded['criteria']);
+    }
+
+    /**
+     * @return iterable<string, array{0: mixed}>
+     */
+    public static function invalidLevelProvider(): iterable
+    {
+        yield 'empty string' => [''];
+        yield 'blank string' => ['   '];
+        yield 'null' => [null];
+        yield 'integer' => [3];
+        yield 'boolean' => [true];
+    }
+
+    #[Test]
+    #[DataProvider('invalidLevelProvider')]
+    public function rejectsALevelThatIsNotAStringArrayOrObject(mixed $level): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('levels entries must be non-empty strings, arrays, or objects.');
+
+        new ScoreQuestion('Urgency?', ['Low', $level]);
     }
 
     #[Test]

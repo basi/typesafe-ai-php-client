@@ -125,6 +125,43 @@ final class QuestionsTest extends TestCase
     }
 
     #[Test]
+    public function theBuilderMethodsAcceptJsonContent(): void
+    {
+        $questions = Questions::create()
+            ->noul(['task' => 'Is it urgent?'], whenTrue: ['yes' => 'now'], whenFalse: (object) ['no' => 'later'])
+            ->choice(['task' => 'Which team?'], ['billing' => ['covers' => 'refunds'], 'other' => null])
+            ->score(['task' => 'How severe?'], ['minor', ['covers' => 'outage']]);
+
+        $encoded = json_encode($questions->toRequest('some state'), JSON_THROW_ON_ERROR);
+
+        self::assertJsonStringEqualsJsonString(
+            <<<'JSON'
+            {
+                "state": "some state",
+                "questions": {
+                    "question_0": {
+                        "type": "noul",
+                        "instructions": {"task": "Is it urgent?"},
+                        "criteria": {"true": {"yes": "now"}, "false": {"no": "later"}}
+                    },
+                    "question_1": {
+                        "type": "choice",
+                        "instructions": {"task": "Which team?"},
+                        "criteria": {"billing": {"covers": "refunds"}, "other": null}
+                    },
+                    "question_2": {
+                        "type": "score",
+                        "instructions": {"task": "How severe?"},
+                        "criteria": ["minor", {"covers": "outage"}]
+                    }
+                }
+            }
+            JSON,
+            $encoded,
+        );
+    }
+
+    #[Test]
     public function toRequestPassesTheExtraHeadersOn(): void
     {
         $request = Questions::create()

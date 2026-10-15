@@ -12,20 +12,25 @@ use TypesafeAi\Limits;
 final readonly class ScoreQuestion implements QuestionInterface
 {
     /**
-     * $levels is validated at runtime (must be a list of non-empty strings within the allowed
-     * count) rather than declared as `list<string>`, so that validation does not appear dead to
-     * static analysis.
+     * $levels is validated at runtime (must be a list of non-empty strings, arrays or objects
+     * within the allowed count) rather than declared as `list<string|array|object>`, so that
+     * validation does not appear dead to static analysis.
      *
-     * @param string $instructions What the model should rate.
+     * Mirrors the official SDK (0.7.5), whose question fields take JSON content rather than only
+     * text: a string, a list or map of values (nested to any depth), or an object that encodes as
+     * JSON, such as a {@see \JsonSerializable}. A string must not be empty; an array or an object
+     * is sent as it is, and the API decides whether it makes sense.
+     *
+     * @param string|array<array-key, mixed>|object $instructions What the model should rate.
      * @param array<array-key, mixed> $levels Ordered level descriptions; the first level scores 0.
-     *     Must be a list of non-empty strings with between {@see Limits::MIN_SCORE_LEVELS} and
-     *     {@see Limits::MAX_SCORE_LEVELS} entries.
+     *     Must be a list of non-empty strings, arrays or objects with between
+     *     {@see Limits::MIN_SCORE_LEVELS} and {@see Limits::MAX_SCORE_LEVELS} entries.
      */
     public function __construct(
-        private string $instructions,
+        private string|array|object $instructions,
         private array $levels,
     ) {
-        if (trim($instructions) === '') {
+        if (is_string($instructions) && trim($instructions) === '') {
             throw new \InvalidArgumentException('instructions must not be empty.');
         }
 
@@ -44,8 +49,9 @@ final readonly class ScoreQuestion implements QuestionInterface
         }
 
         foreach ($levels as $level) {
-            if (!is_string($level) || trim($level) === '') {
-                throw new \InvalidArgumentException('levels entries must be non-empty strings.');
+            $isContent = is_array($level) || is_object($level) || (is_string($level) && trim($level) !== '');
+            if (!$isContent) {
+                throw new \InvalidArgumentException('levels entries must be non-empty strings, arrays, or objects.');
             }
         }
     }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace TypesafeAi\Tests\Unit\Response;
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use TypesafeAi\Exception\ResponseFormatException;
@@ -86,6 +87,68 @@ final class SystemOneResponseTest extends TestCase
         self::assertArrayHasKey(0, $answer->legend());
         self::assertArrayHasKey('1', $answer->probabilities());
         self::assertArrayHasKey(1, $answer->probabilities());
+    }
+
+    #[Test]
+    public function hydratesAScoreAnswerWhoseLegendHoldsJsonContent(): void
+    {
+        $data = self::validData();
+        $data['answers'] = [
+            'urgency' => [
+                'type' => 'score',
+                'score' => 1,
+                'confidence' => 0.5,
+                'legend' => [
+                    '0' => 'Can wait',
+                    '1' => ['meaning' => 'Needs attention', 'examples' => ['today', ['note' => null]]],
+                    '2' => ['listed', 'level'],
+                ],
+                'probabilities' => ['0' => 0.1, '1' => 0.8, '2' => 0.1],
+            ],
+        ];
+
+        $answer = SystemOneResponse::fromJson(json_encode($data, JSON_THROW_ON_ERROR))->answer('urgency');
+
+        self::assertInstanceOf(ScoreAnswer::class, $answer);
+        $entries = array_values($answer->legend());
+        self::assertCount(3, $entries);
+        self::assertSame('Can wait', $entries[0]);
+        self::assertEquals(['meaning' => 'Needs attention', 'examples' => ['today', ['note' => null]]], $entries[1]);
+        self::assertEquals(['listed', 'level'], $entries[2]);
+        self::assertSame($answer->legend(), $answer->toArray()['legend']);
+    }
+
+    /**
+     * @return iterable<string, array{0: mixed, 1: string}>
+     */
+    public static function invalidLegendEntryProvider(): iterable
+    {
+        yield 'integer' => [5, 'int'];
+        yield 'null' => [null, 'null'];
+        yield 'boolean' => [true, 'bool'];
+    }
+
+    #[Test]
+    #[DataProvider('invalidLegendEntryProvider')]
+    public function aLegendEntryThatIsNeitherTextNorJsonContentIsRejected(mixed $entry, string $type): void
+    {
+        $data = self::validData();
+        $data['answers'] = [
+            'urgency' => [
+                'type' => 'score',
+                'score' => 1,
+                'confidence' => 0.5,
+                'legend' => ['0' => 'Can wait', '1' => $entry],
+                'probabilities' => ['0' => 0.5, '1' => 0.5],
+            ],
+        ];
+
+        $this->expectException(ResponseFormatException::class);
+        $this->expectExceptionMessage(
+            sprintf('answers.urgency.legend.1: expected a string, an array, or an object, got %s.', $type),
+        );
+
+        SystemOneResponse::fromJson(json_encode($data, JSON_THROW_ON_ERROR));
     }
 
     #[Test]
