@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace TypesafeAi\Request;
 
+use TypesafeAi\Request\Question\BoxQuestion;
 use TypesafeAi\Request\Question\ChoiceQuestion;
 use TypesafeAi\Request\Question\NoulQuestion;
 use TypesafeAi\Request\Question\QuestionInterface;
@@ -89,6 +90,17 @@ final class Questions implements \Countable
     public function score(string|array|object $instructions, array $levels, ?string $name = null): self
     {
         return $this->add(new ScoreQuestion($instructions, $levels), $name);
+    }
+
+    /**
+     * Add a {@see BoxQuestion}. See {@see self::add()} for how $name is assigned.
+     *
+     * @param string|array<array-key, mixed>|object|null $instructions What to locate in the image;
+     *     see {@see BoxQuestion::__construct()}.
+     */
+    public function box(string|array|object|null $instructions = null, ?string $name = null): self
+    {
+        return $this->add(new BoxQuestion($instructions), $name);
     }
 
     /**

@@ -7,6 +7,7 @@ namespace TypesafeAi\Tests\Unit\Request;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use TypesafeAi\Request\Image;
+use TypesafeAi\Request\Question\BoxQuestion;
 use TypesafeAi\Request\Question\ChoiceQuestion;
 use TypesafeAi\Request\Question\NoulQuestion;
 use TypesafeAi\Request\Questions;
@@ -160,6 +161,31 @@ final class QuestionsTest extends TestCase
             }
             JSON,
             $encoded,
+        );
+    }
+
+    #[Test]
+    public function boxAddsABoxQuestion(): void
+    {
+        $questions = Questions::create()->box('The dog')->box(name: 'whole');
+
+        self::assertSame(['question_0', 'whole'], $questions->names());
+        self::assertInstanceOf(BoxQuestion::class, $questions->toArray()['question_0']);
+        self::assertSame(
+            '{"state":"photo","questions":{"question_0":{"type":"box","instructions":"The dog"},'
+            . '"whole":{"type":"box"}}}',
+            json_encode($questions->toRequest('photo'), JSON_THROW_ON_ERROR),
+        );
+    }
+
+    #[Test]
+    public function boxAcceptsJsonContent(): void
+    {
+        $questions = Questions::create()->box(['find' => ['the dog']]);
+
+        self::assertSame(
+            '{"state":"photo","questions":{"question_0":{"type":"box","instructions":{"find":["the dog"]}}}}',
+            json_encode($questions->toRequest('photo'), JSON_THROW_ON_ERROR),
         );
     }
 

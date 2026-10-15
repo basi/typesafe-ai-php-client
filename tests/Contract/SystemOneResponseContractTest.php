@@ -7,6 +7,7 @@ namespace TypesafeAi\Tests\Contract;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
+use TypesafeAi\Response\Answer\BoxAnswer;
 use TypesafeAi\Response\Answer\ChoiceAnswer;
 use TypesafeAi\Response\Answer\NoulAnswer;
 use TypesafeAi\Response\Answer\ScoreAnswer;
@@ -132,5 +133,34 @@ final class SystemOneResponseContractTest extends TestCase
 
         self::assertGreaterThanOrEqual(0, $response->usage()->inputTokens());
         self::assertGreaterThanOrEqual(0, $response->usage()->outputTokens());
+    }
+
+    #[Test]
+    public function syntheticBoxResponseHydrates(): void
+    {
+        $body = file_get_contents(__DIR__ . '/fixtures/synthetic/box-response.json');
+        self::assertNotFalse($body);
+
+        $response = SystemOneResponse::fromJson($body);
+
+        self::assertCount(2, $response->answers());
+        foreach ($response->answers() as $answer) {
+            self::assertInstanceOf(BoxAnswer::class, $answer);
+            $box = $answer->box();
+            foreach ([$box->top(), $box->bottom(), $box->left(), $box->right()] as $edge) {
+                self::assertSame('double', gettype($edge));
+                self::assertGreaterThanOrEqual(0.0, $edge);
+                self::assertLessThanOrEqual(1.0, $edge);
+            }
+        }
+
+        $dog = $response->answer('dog');
+        self::assertInstanceOf(BoxAnswer::class, $dog);
+        self::assertSame(0.9, $dog->confidence());
+        self::assertSame(0.2, $dog->box()->top());
+
+        $unsure = $response->answer('unsure');
+        self::assertInstanceOf(BoxAnswer::class, $unsure);
+        self::assertNull($unsure->confidence());
     }
 }

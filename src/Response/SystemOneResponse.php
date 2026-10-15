@@ -6,6 +6,7 @@ namespace TypesafeAi\Response;
 
 use TypesafeAi\Exception\ResponseFormatException;
 use TypesafeAi\Response\Answer\AnswerInterface;
+use TypesafeAi\Response\Answer\BoxAnswer;
 use TypesafeAi\Response\Answer\ChoiceAnswer;
 use TypesafeAi\Response\Answer\NoulAnswer;
 use TypesafeAi\Response\Answer\ScoreAnswer;
@@ -107,6 +108,7 @@ final class SystemOneResponse
             'noul' => NoulAnswer::fromArray($data, $path),
             'choice' => ChoiceAnswer::fromArray($data, $path),
             'score' => ScoreAnswer::fromArray($data, $path),
+            'box' => BoxAnswer::fromArray($data, $path),
             default => new UnknownAnswer($data['type'], $data),
         };
     }

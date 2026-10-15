@@ -8,6 +8,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use TypesafeAi\Exception\ResponseFormatException;
+use TypesafeAi\Response\Answer\BoxAnswer;
 use TypesafeAi\Response\Answer\ChoiceAnswer;
 use TypesafeAi\Response\Answer\NoulAnswer;
 use TypesafeAi\Response\Answer\ScoreAnswer;
@@ -147,6 +148,38 @@ final class SystemOneResponseTest extends TestCase
         $this->expectExceptionMessage(
             sprintf('answers.urgency.legend.1: expected a string, an array, or an object, got %s.', $type),
         );
+
+        SystemOneResponse::fromJson(json_encode($data, JSON_THROW_ON_ERROR));
+    }
+
+    #[Test]
+    public function hydratesABoxAnswerRatherThanKeepingItAsUnknown(): void
+    {
+        $data = self::validData();
+        $data['answers'] = [
+            'dog' => [
+                'type' => 'box',
+                'box' => ['top' => 0.2, 'bottom' => 0.66, 'left' => 0.19, 'right' => 0.68],
+                'confidence' => 0.9,
+            ],
+        ];
+
+        $answer = SystemOneResponse::fromJson(json_encode($data, JSON_THROW_ON_ERROR))->answer('dog');
+
+        self::assertInstanceOf(BoxAnswer::class, $answer);
+        self::assertSame('box', $answer->type());
+        self::assertSame(0.66, $answer->box()->bottom());
+        self::assertSame(0.9, $answer->confidence());
+    }
+
+    #[Test]
+    public function aBoxAnswerWithoutItsBoxIsRejectedByPath(): void
+    {
+        $data = self::validData();
+        $data['answers'] = ['dog' => ['type' => 'box', 'confidence' => null]];
+
+        $this->expectException(ResponseFormatException::class);
+        $this->expectExceptionMessage('answers.dog.box: field is required but missing.');
 
         SystemOneResponse::fromJson(json_encode($data, JSON_THROW_ON_ERROR));
     }
