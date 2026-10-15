@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace TypesafeAi;
 
+use TypesafeAi\Http\Headers;
+
 /**
  * Configuration for a typesafe.ai API client.
  */
@@ -12,10 +14,19 @@ final class ClientOptions
     public readonly string $baseUrl;
 
     /**
+     * Headers sent with every request this client makes, `GET /v1/models` included. See the
+     * constructor for how they combine with the other headers of a request.
+     *
+     * @var array<string, string>
+     */
+    public readonly array $headers;
+
+    /**
      * All arguments are validated at runtime (non-empty $baseUrl/$defaultModel, minimum
-     * timeouts, non-negative retry counts, non-negative delay cap), so their declared types are
-     * intentionally the wide native types rather than a narrower PHPDoc type — narrowing them
-     * would make the validation below appear dead to static analysis.
+     * timeouts, non-negative retry counts, non-negative delay cap, well-formed $headers), so
+     * their declared types are intentionally the wide native types rather than a narrower
+     * PHPDoc type — narrowing them would make the validation below appear dead to static
+     * analysis.
      *
      * @param string $baseUrl Absolute base URL of the API, non-empty. A trailing slash is trimmed.
      * @param string $defaultModel Model name or alias used when a request does not specify one,
@@ -42,6 +53,15 @@ final class ClientOptions
      *     ceiling. Useful for a caller with a hard upper bound on how long one call may take, such
      *     as a queue worker with a job timeout — see the README's "Options" section for how to
      *     size it.
+     * @param array<array-key, mixed> $headers Header name to header value, added to every request.
+     *     Mirrors the official SDK (0.7.5)'s client-wide `headers`. A request's own
+     *     {@see \TypesafeAi\Request\SystemOneRequest::extraHeaders()} replaces a header of the same
+     *     name set here (names are compared without regard to case), and the headers this client
+     *     always sets — `Authorization`, `Accept`, `User-Agent`, `X-TypeSafe-SDK` and
+     *     `X-TypeSafe-Runtime`, plus `Content-Type` on a request with a body — replace both. The
+     *     `X-TypeSafe-Retry-Count` header is the client's alone: one given here is dropped. Each
+     *     name must be an HTTP token and each value a string without line breaks or other control
+     *     characters, or the constructor throws an `\InvalidArgumentException`.
      */
     public function __construct(
         string $baseUrl = 'https://api.typesafe.ai',
@@ -52,6 +72,7 @@ final class ClientOptions
         public readonly int $modelsMaxRetries = 2,
         public readonly bool $retryRateLimitedPost = true,
         public readonly ?int $maxRetryDelayMs = null,
+        array $headers = [],
     ) {
         if (trim($baseUrl) === '') {
             throw new \InvalidArgumentException('baseUrl must not be empty.');
@@ -96,5 +117,6 @@ final class ClientOptions
         }
 
         $this->baseUrl = rtrim($baseUrl, '/');
+        $this->headers = Headers::validate($headers, 'headers');
     }
 }

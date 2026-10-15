@@ -10,7 +10,7 @@ namespace TypesafeAi\Request\Question;
 interface QuestionInterface extends \JsonSerializable
 {
     /**
-     * The question type discriminator: "noul", "choice", or "score".
+     * The question type discriminator: "noul", "choice", "score", or "box".
      */
     public function type(): string;
 }

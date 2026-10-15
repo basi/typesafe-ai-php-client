@@ -6,6 +6,7 @@ namespace TypesafeAi\Response;
 
 use TypesafeAi\Exception\ResponseFormatException;
 use TypesafeAi\Response\Answer\AnswerInterface;
+use TypesafeAi\Response\Answer\BoxAnswer;
 use TypesafeAi\Response\Answer\ChoiceAnswer;
 use TypesafeAi\Response\Answer\NoulAnswer;
 use TypesafeAi\Response\Answer\ScoreAnswer;
@@ -92,6 +93,25 @@ final class SystemOneResponse
     }
 
     /**
+     * @template T of AnswerInterface
+     *
+     * @param class-string<T> $class
+     *
+     * @return array<string, T>
+     */
+    private function answersOfType(string $class): array
+    {
+        $matching = [];
+        foreach ($this->answers as $name => $answer) {
+            if ($answer instanceof $class) {
+                $matching[$name] = $answer;
+            }
+        }
+
+        return $matching;
+    }
+
+    /**
      * @param array<array-key, mixed> $data
      */
     private static function hydrateAnswer(array $data, string $path): AnswerInterface
@@ -107,6 +127,7 @@ final class SystemOneResponse
             'noul' => NoulAnswer::fromArray($data, $path),
             'choice' => ChoiceAnswer::fromArray($data, $path),
             'score' => ScoreAnswer::fromArray($data, $path),
+            'box' => BoxAnswer::fromArray($data, $path),
             default => new UnknownAnswer($data['type'], $data),
         };
     }
@@ -140,6 +161,50 @@ final class SystemOneResponse
     public function hasAnswer(string $name): bool
     {
         return array_key_exists($name, $this->answers);
+    }
+
+    /**
+     * The yes/no answers, by question name, in the order of {@see self::answers()}. Mirrors the
+     * official SDK (0.7.5)'s `nouls`. They are the same objects as in {@see self::answers()}.
+     *
+     * @return array<string, NoulAnswer>
+     */
+    public function nouls(): array
+    {
+        return $this->answersOfType(NoulAnswer::class);
+    }
+
+    /**
+     * The choice answers, by question name; see {@see self::nouls()}. Mirrors the official SDK
+     * (0.7.5)'s `choices`.
+     *
+     * @return array<string, ChoiceAnswer>
+     */
+    public function choices(): array
+    {
+        return $this->answersOfType(ChoiceAnswer::class);
+    }
+
+    /**
+     * The score answers, by question name; see {@see self::nouls()}. Mirrors the official SDK
+     * (0.7.5)'s `scores`.
+     *
+     * @return array<string, ScoreAnswer>
+     */
+    public function scores(): array
+    {
+        return $this->answersOfType(ScoreAnswer::class);
+    }
+
+    /**
+     * The box answers, by question name; see {@see self::nouls()}. Mirrors the official SDK
+     * (0.7.5)'s `boxes`.
+     *
+     * @return array<string, BoxAnswer>
+     */
+    public function boxes(): array
+    {
+        return $this->answersOfType(BoxAnswer::class);
     }
 
     public function usage(): Usage

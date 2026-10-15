@@ -17,7 +17,7 @@ final readonly class ScoreAnswer implements AnswerInterface
 {
     /**
      * @param array<string, float> $probabilities
-     * @param array<string, string> $legend
+     * @param array<string, string|array<array-key, mixed>> $legend
      * @param array<array-key, mixed> $raw
      */
     private function __construct(
@@ -57,8 +57,14 @@ final readonly class ScoreAnswer implements AnswerInterface
 
         $legend = [];
         foreach ($data['legend'] as $key => $value) {
-            if (!is_string($value)) {
-                throw ResponseFormatException::expectedType("{$path}.legend.{$key}", 'a string', $value);
+            // A level requested as JSON content (see ScoreQuestion) comes back as that content: a
+            // string, or a decoded JSON array or object.
+            if (!is_string($value) && !is_array($value)) {
+                throw ResponseFormatException::expectedType(
+                    "{$path}.legend.{$key}",
+                    'a string, an array, or an object',
+                    $value,
+                );
             }
             $legend[(string) $key] = $value;
         }
@@ -119,8 +125,11 @@ final readonly class ScoreAnswer implements AnswerInterface
     }
 
     /**
-     * @return array<string, string> The requested level descriptions, keyed by level index as a
-     *     string, in the order the server sent them.
+     * Mirrors the official SDK (0.7.5), whose legend entries are text or JSON content.
+     *
+     * @return array<string, string|array<array-key, mixed>> The requested level descriptions,
+     *     keyed by level index as a string, in the order the server sent them. A level that was
+     *     requested as JSON content rather than as text is returned as the decoded array.
      */
     public function legend(): array
     {

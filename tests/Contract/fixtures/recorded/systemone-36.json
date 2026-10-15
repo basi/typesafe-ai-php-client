@@ -1,0 +1,19 @@
+{
+  "model": "jev-1.14.0",
+  "answers": {
+    "red_square": {
+      "type": "box",
+      "box": {
+        "top": 0.25,
+        "bottom": 0.75,
+        "left": 0.25,
+        "right": 0.76
+      },
+      "confidence": 0.84
+    }
+  },
+  "usage": {
+    "input_tokens": 1029,
+    "output_tokens": 21
+  }
+}

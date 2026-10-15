@@ -1,0 +1,35 @@
+{
+  "model": "jev-1.13.0",
+  "answers": {
+    "is_red": {
+      "type": "noul",
+      "noul": 0.99
+    },
+    "color": {
+      "type": "choice",
+      "choice": "red",
+      "confidence": 0.98,
+      "probabilities": {
+        "red": 0.99,
+        "blue": 0.01
+      }
+    },
+    "similarity": {
+      "type": "score",
+      "score": 0.96,
+      "confidence": 0.92,
+      "legend": {
+        "0": "<image:d91f9ced0027445ba3df25b107d26874>",
+        "1": "<image:9f13c17f5ae74cf1929f144fc48e2622>"
+      },
+      "probabilities": {
+        "0": 0.04,
+        "1": 0.96
+      }
+    }
+  },
+  "usage": {
+    "input_tokens": 4132,
+    "output_tokens": 64
+  }
+}

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace TypesafeAi\Request;
 
+use TypesafeAi\Request\Question\BoxQuestion;
 use TypesafeAi\Request\Question\ChoiceQuestion;
 use TypesafeAi\Request\Question\NoulQuestion;
 use TypesafeAi\Request\Question\QuestionInterface;
@@ -52,11 +53,16 @@ final class Questions implements \Countable
 
     /**
      * Add a {@see NoulQuestion}. See {@see self::add()} for how $name is assigned.
+     *
+     * @param string|array<array-key, mixed>|object $instructions Text or JSON content; see
+     *     {@see NoulQuestion::__construct()}.
+     * @param string|array<array-key, mixed>|object|null $whenTrue
+     * @param string|array<array-key, mixed>|object|null $whenFalse
      */
     public function noul(
-        string $instructions,
-        ?string $whenTrue = null,
-        ?string $whenFalse = null,
+        string|array|object $instructions,
+        string|array|object|null $whenTrue = null,
+        string|array|object|null $whenFalse = null,
         ?string $name = null,
     ): self {
         return $this->add(new NoulQuestion($instructions, $whenTrue, $whenFalse), $name);
@@ -65,9 +71,11 @@ final class Questions implements \Countable
     /**
      * Add a {@see ChoiceQuestion}. See {@see self::add()} for how $name is assigned.
      *
-     * @param array<string, ?string> $options
+     * @param string|array<array-key, mixed>|object $instructions Text or JSON content; see
+     *     {@see ChoiceQuestion::__construct()}.
+     * @param array<string, string|array<array-key, mixed>|object|null> $options
      */
-    public function choice(string $instructions, array $options, ?string $name = null): self
+    public function choice(string|array|object $instructions, array $options, ?string $name = null): self
     {
         return $this->add(new ChoiceQuestion($instructions, $options), $name);
     }
@@ -75,11 +83,24 @@ final class Questions implements \Countable
     /**
      * Add a {@see ScoreQuestion}. See {@see self::add()} for how $name is assigned.
      *
-     * @param list<string> $levels
+     * @param string|array<array-key, mixed>|object $instructions Text or JSON content; see
+     *     {@see ScoreQuestion::__construct()}.
+     * @param list<string|array<array-key, mixed>|object> $levels
      */
-    public function score(string $instructions, array $levels, ?string $name = null): self
+    public function score(string|array|object $instructions, array $levels, ?string $name = null): self
     {
         return $this->add(new ScoreQuestion($instructions, $levels), $name);
+    }
+
+    /**
+     * Add a {@see BoxQuestion}. See {@see self::add()} for how $name is assigned.
+     *
+     * @param string|array<array-key, mixed>|object|null $instructions What to locate in the image;
+     *     see {@see BoxQuestion::__construct()}.
+     */
+    public function box(string|array|object|null $instructions = null, ?string $name = null): self
+    {
+        return $this->add(new BoxQuestion($instructions), $name);
     }
 
     /**
@@ -135,12 +156,22 @@ final class Questions implements \Countable
     /**
      * Build a {@see SystemOneRequest} from the questions declared so far.
      *
+     * @param array<array-key, mixed> $assets Images with a name of your choosing, by name; see
+     *     {@see SystemOneRequest::__construct()}.
+     * @param array<array-key, mixed> $extraHeaders Headers for this request only; see
+     *     {@see SystemOneRequest::__construct()}.
+     *
      * @throws \InvalidArgumentException if no question has been added yet ({@see SystemOneRequest}
-     *     rejects an empty question map).
+     *     rejects an empty question map), or for any other reason {@see SystemOneRequest} rejects
+     *     its arguments.
      */
-    public function toRequest(mixed $state, ?string $model = null): SystemOneRequest
-    {
-        return new SystemOneRequest($state, $this->questions, $model);
+    public function toRequest(
+        mixed $state,
+        ?string $model = null,
+        array $assets = [],
+        array $extraHeaders = [],
+    ): SystemOneRequest {
+        return new SystemOneRequest($state, $this->questions, $model, $assets, $extraHeaders);
     }
 
     public function count(): int

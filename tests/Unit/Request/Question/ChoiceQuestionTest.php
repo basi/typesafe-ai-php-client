@@ -77,6 +77,38 @@ final class ChoiceQuestionTest extends TestCase
     }
 
     #[Test]
+    public function acceptsJsonContentForTheInstructionsAndTheDescriptions(): void
+    {
+        $question = new ChoiceQuestion(
+            ['task' => 'Pick the tone.', 'hints' => ['mind sarcasm']],
+            [
+                'angry' => ['meaning' => 'Hostile', 'examples' => ['this is unacceptable']],
+                'calm' => (object) ['meaning' => 'Polite'],
+                'unsure' => null,
+                'neutral' => 'No emotion',
+                '1' => ['numeric', 'name'],
+            ],
+        );
+
+        self::assertJsonStringEqualsJsonString(
+            <<<'JSON'
+            {
+                "type": "choice",
+                "instructions": {"task": "Pick the tone.", "hints": ["mind sarcasm"]},
+                "criteria": {
+                    "angry": {"meaning": "Hostile", "examples": ["this is unacceptable"]},
+                    "calm": {"meaning": "Polite"},
+                    "unsure": null,
+                    "neutral": "No emotion",
+                    "1": ["numeric", "name"]
+                }
+            }
+            JSON,
+            json_encode($question, JSON_THROW_ON_ERROR),
+        );
+    }
+
+    #[Test]
     public function rejectsEmptyInstructions(): void
     {
         $this->expectException(\InvalidArgumentException::class);

@@ -8,6 +8,7 @@ use TypesafeAi\Exception\ResponseFormatException;
 use TypesafeAi\Request\Question\QuestionInterface;
 use TypesafeAi\Request\Questions;
 use TypesafeAi\Response\Answer\AnswerInterface;
+use TypesafeAi\Response\Answer\BoxAnswer;
 use TypesafeAi\Response\Answer\ChoiceAnswer;
 use TypesafeAi\Response\Answer\NoulAnswer;
 use TypesafeAi\Response\Answer\ScoreAnswer;
@@ -156,6 +157,20 @@ final class TypedSystemOneResponse
 
         if (!$answer instanceof ScoreAnswer) {
             throw $this->wrongKind($key, $answer, 'score');
+        }
+
+        return $answer;
+    }
+
+    /**
+     * @throws \LogicException if the answer at $key is not a {@see BoxAnswer}.
+     */
+    public function box(int|string $key): BoxAnswer
+    {
+        $answer = $this->answer($key);
+
+        if (!$answer instanceof BoxAnswer) {
+            throw $this->wrongKind($key, $answer, 'box');
         }
 
         return $answer;

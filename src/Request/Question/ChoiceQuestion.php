@@ -12,20 +12,27 @@ use TypesafeAi\Limits;
 final readonly class ChoiceQuestion implements QuestionInterface
 {
     /**
-     * PHP normalises a numeric-looking string key (e.g. "1") to an integer, so $options is typed
-     * `array<array-key, ?string>` rather than `array<string, ?string>`: a caller naming an option
-     * "1" is legitimate, and its key genuinely is an int by the time this constructor sees it.
+     * PHP normalises a numeric-looking string key (e.g. "1") to an integer, so $options is keyed
+     * `array-key` rather than `string`: a caller naming an option "1" is legitimate, and its key
+     * genuinely is an int by the time this constructor sees it.
      *
-     * @param string $instructions What the model should decide when choosing an option.
-     * @param array<array-key, ?string> $options Option name to description, 1 to
-     *     {@see Limits::MAX_CHOICE_OPTIONS} entries. A null description means the option is
-     *     interpreted by its name alone.
+     * Mirrors the official SDK (0.7.5), whose question fields take JSON content rather than only
+     * text: a string, a list or map of values (nested to any depth), or an object that encodes as
+     * JSON, such as a {@see \JsonSerializable} or an {@see \TypesafeAi\Request\Image}. A string
+     * $instructions must not be empty; an array or an object, and any option description, is sent
+     * as it is, and the API decides whether it makes sense.
+     *
+     * @param string|array<array-key, mixed>|object $instructions What the model should decide when
+     *     choosing an option.
+     * @param array<array-key, string|array<array-key, mixed>|object|null> $options Option name to
+     *     description, 1 to {@see Limits::MAX_CHOICE_OPTIONS} entries. A null description means
+     *     the option is interpreted by its name alone.
      */
     public function __construct(
-        private string $instructions,
+        private string|array|object $instructions,
         private array $options,
     ) {
-        if (trim($instructions) === '') {
+        if (is_string($instructions) && trim($instructions) === '') {
             throw new \InvalidArgumentException('instructions must not be empty.');
         }
 

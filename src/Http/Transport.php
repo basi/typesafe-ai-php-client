@@ -13,8 +13,8 @@ use TypesafeAi\Exception\TransportException;
 
 /**
  * Thin wrapper around a PSR-18 HTTP client: builds a request from a method, URL, header map, and
- * an optional JSON body, sends it, and converts any transport-level failure — a
- * `Psr\Http\Client\NetworkExceptionInterface` or `RequestExceptionInterface`, a Guzzle
+ * an optional body (JSON, or a multipart upload), sends it, and converts any transport-level
+ * failure — a `Psr\Http\Client\NetworkExceptionInterface` or `RequestExceptionInterface`, a Guzzle
  * `ConnectException`, or any other `\Throwable` the HTTP layer raises — into a part-1 exception:
  * {@see TimeoutException} when the failure looks like a timeout (a "cURL error 28", or a message
  * mentioning "timed out"), {@see TransportException} otherwise. Both always carry
