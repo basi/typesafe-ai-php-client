@@ -42,7 +42,7 @@ final class Client implements ClientInterface
      * declaration shape — `public const VERSION = '<major>.<minor>.<patch>';`, without a type —
      * so do not add a `string` type to this constant.
      */
-    public const VERSION = '0.2.0';
+    public const VERSION = '0.2.1';
 
     private const string JSON_CONTENT_TYPE = 'application/json';
 
