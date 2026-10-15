@@ -41,8 +41,10 @@ final class SystemOneBody
      *
      * The images sent, in this order, are those named in the request's `assets`, in the order
      * given, then those whose reference appears in the encoded JSON, in the order they first
-     * appear: an image placed in the content, or one whose reference the text mentions. A
-     * reference to an image that is not one of those is just text.
+     * appear: an image placed in the content, one the client has attached, or a named one, whose
+     * reference the text mentions. A reference to any other image is just text.
+     *
+     * @param array<string, Image> $attached The images the client has attached, by reference.
      *
      * @return array{string, string} The `Content-Type` header value and the body.
      *
@@ -50,7 +52,7 @@ final class SystemOneBody
      * @throws AssetException if an image cannot be read. The message names the image by the name it
      *     has in the request: its alias, or its reference when it has none.
      */
-    public static function encode(SystemOneRequest $request): array
+    public static function encode(SystemOneRequest $request, array $attached = []): array
     {
         // A named image is written as its name wherever it is placed; any other is written as its
         // reference and reported in $found.
@@ -59,9 +61,10 @@ final class SystemOneBody
         /** @var array<array-key, Image> $pending The images to upload, by name, in order. */
         $pending = $request->assets();
 
-        // The references the body may mention: that of a named image, which text can hold, for
-        // example from an interpolated string, and that of an image placed in the content.
-        $known = array_replace(self::indexedByReference($pending), $found);
+        // The references the body may mention: that of an attached image, that of a named image,
+        // and that of an image placed in the content. Text can hold any of them, for example from
+        // an interpolated string. The later kind wins if a reference is in more than one.
+        $known = array_replace($attached, self::indexedByReference($pending), $found);
 
         // A reference is JSON-safe ASCII, so one scan of the encoded body finds it in every string.
         if ($known !== [] && preg_match_all(self::REFERENCE_PATTERN, $json, $matches) > 0) {

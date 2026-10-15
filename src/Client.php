@@ -18,6 +18,8 @@ use TypesafeAi\Http\Redactor;
 use TypesafeAi\Http\RetryPolicy;
 use TypesafeAi\Http\SystemOneBody;
 use TypesafeAi\Http\Transport;
+use TypesafeAi\Request\AttachedAssets;
+use TypesafeAi\Request\Image;
 use TypesafeAi\Request\Questions;
 use TypesafeAi\Request\SystemOneRequest;
 use TypesafeAi\Response\ModelCard;
@@ -53,6 +55,8 @@ final class Client implements ClientInterface
     private readonly Transport $transport;
 
     private readonly RetryPolicy $retryPolicy;
+
+    private readonly AttachedAssets $attached;
 
     /**
      * @param string $apiKey typesafe.ai API key. Leading and trailing ASCII space characters
@@ -91,6 +95,7 @@ final class Client implements ClientInterface
             $this->redactor,
         );
         $this->retryPolicy = new RetryPolicy(maxServerDelayMilliseconds: $options->maxRetryDelayMs);
+        $this->attached = new AttachedAssets();
     }
 
     /**
@@ -109,7 +114,7 @@ final class Client implements ClientInterface
 
         // The body is built, and every image read, before the first attempt: an image that cannot
         // be read throws here, with nothing sent, and every retry sends the very same bytes.
-        [$contentType, $body] = SystemOneBody::encode($effectiveRequest);
+        [$contentType, $body] = SystemOneBody::encode($effectiveRequest, $this->attached->snapshot());
 
         return $this->sendWithRetry(
             'POST',
@@ -119,6 +124,53 @@ final class Client implements ClientInterface
             static fn (string $responseBody, ?string $requestId): SystemOneResponse
                 => SystemOneResponse::fromJson($responseBody, $requestId),
         );
+    }
+
+    /**
+     * Attaches images to this client while $callback runs, so that text in the requests it sends
+     * can refer to them by their reference without placing them anywhere in the request.
+     *
+     * Mirrors the official SDK (0.7.5)'s `attach_assets`, which is a context manager; PHP has none,
+     * so the attachment lasts for the callback instead and ends when it returns or throws:
+     *
+     * ```php
+     * $photo = Image::fromPath('product.png');
+     * $response = $client->attachAssets($photo, fn () => $client->systemOne(
+     *     new SystemOneRequest("Product: {$photo}", ['damaged' => new NoulQuestion('Is it damaged?')]),
+     * ));
+     * ```
+     *
+     * Until then, every request this client sends uploads each attached image whose reference
+     * appears in it: only those, and only if the request mentions the reference. The attachments
+     * belong to this client and are seen by every call it makes meanwhile, including calls made by
+     * other fibers. Attaching an image that is already attached, in a nested callback or from
+     * another fiber, holds it again, and it stays attached until the last hold ends. Within one
+     * flow of execution the attachments nest, since each ends with its callback; only fibers that
+     * interleave can make them overlap without nesting.
+     *
+     * A reference to an image that is not attached, named or placed in the request is sent as plain
+     * text, without the image.
+     *
+     * @template T
+     *
+     * @param Image|array<array-key, mixed> $assets An image, or an array of images.
+     * @param callable(): T $callback
+     *
+     * @return T Whatever $callback returns.
+     *
+     * @throws \InvalidArgumentException if a value in $assets is not an {@see Image}. Nothing is
+     *     attached and $callback does not run.
+     * @throws \Throwable Whatever $callback throws, after the attachment has ended.
+     */
+    public function attachAssets(Image|array $assets, callable $callback): mixed
+    {
+        $held = $this->attached->attach($assets);
+
+        try {
+            return $callback();
+        } finally {
+            $this->attached->release($held);
+        }
     }
 
     /**
