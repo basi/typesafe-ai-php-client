@@ -28,7 +28,7 @@ usual — a Packagist listing is not required for this to work:
 
 ```bash
 composer config repositories.typesafe-ai-php-client vcs https://github.com/basi/typesafe-ai-php-client
-composer require basi/typesafe-ai-php-client:^0.1
+composer require basi/typesafe-ai-php-client:^0.2
 ```
 
 Requires PHP 8.4 or newer.
