@@ -12,7 +12,8 @@ use TypesafeAi\Uuid;
  *
  * Mirrors the official SDK (0.7.5)'s `Image`, with named constructors instead of its single
  * constructor, because a PHP string cannot say whether it holds image bytes or a path:
- * {@see self::fromBytes()}, {@see self::fromPath()} and {@see self::fromBase64()}.
+ * {@see self::fromBytes()}, {@see self::fromPath()}, {@see self::fromBase64()} and, with the GD
+ * extension, {@see self::fromGd()}.
  *
  * Put an `Image` anywhere in the request's content: as the whole `state`, inside a nested array or
  * object, or in a question's instructions or criteria. It is sent as a file part of a
@@ -41,6 +42,12 @@ use TypesafeAi\Uuid;
 final class Image implements \JsonSerializable, \Stringable
 {
     private const string BASE64_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+
+    /**
+     * The quality that GD encodes JPEG, WebP and AVIF images with, as the official SDK (0.7.5) does
+     * for the images it encodes.
+     */
+    private const int GD_QUALITY = 95;
 
     private readonly string $reference;
 
@@ -158,6 +165,76 @@ final class Image implements \JsonSerializable, \Stringable
     }
 
     /**
+     * An image from a GD image, which is encoded now. Needs the GD extension.
+     *
+     * Mirrors the official SDK (0.7.5)'s `Image.from_pil`. The image is encoded with GD's default
+     * settings, except that JPEG, WebP and AVIF use quality 95. Encode it yourself, and pass the
+     * result to {@see self::fromBytes()}, if other settings are needed.
+     *
+     * JPEG cannot store transparency: GD writes the pixels without their alpha channel, so a
+     * transparent area shows whatever colour its pixels hold underneath, often black. Pass `png`
+     * for an image that has transparent areas. GIF holds at most 256 colours.
+     *
+     * The API accepts PNG and JPEG only, at the time of writing. The other formats are encoded and
+     * uploaded all the same, labelled as binary data, and the API rejects them with a `400`: like
+     * `from_pil` in the official SDK, this method leaves the formats to the API instead of
+     * restricting them. WebP and AVIF are only available when the PHP build's GD supports them.
+     *
+     * @param string $format `jpeg`, `png`, `gif`, `webp`, `bmp` or `avif`, in any case.
+     *
+     * @throws \InvalidArgumentException if $format is not one of those, or GD cannot encode the
+     *     image in it, for example because this build of PHP has no encoder for it.
+     */
+    public static function fromGd(\GdImage $image, string $format = 'jpeg'): self
+    {
+        $encoder = match (strtolower($format)) {
+            'jpeg' => static fn (\GdImage $gd): bool => imagejpeg($gd, null, self::GD_QUALITY),
+            'png' => static fn (\GdImage $gd): bool => imagepng($gd),
+            'gif' => static fn (\GdImage $gd): bool => imagegif($gd),
+            'bmp' => static fn (\GdImage $gd): bool => imagebmp($gd),
+            'webp' => function_exists('imagewebp')
+                ? static fn (\GdImage $gd): bool => imagewebp($gd, null, self::GD_QUALITY)
+                : null,
+            'avif' => function_exists('imageavif')
+                ? static fn (\GdImage $gd): bool => imageavif($gd, null, self::GD_QUALITY)
+                : null,
+            default => throw self::cannotEncode(
+                $format,
+                'the format must be jpeg, png, gif, webp, bmp or avif',
+            ),
+        };
+
+        if ($encoder === null) {
+            throw self::cannotEncode($format, 'this build of PHP has no GD encoder for it');
+        }
+
+        // The encoders write to the output when they are not given a file.
+        $warning = null;
+        set_error_handler(static function (int $severity, string $message) use (&$warning): bool {
+            $warning = $message;
+
+            return true;
+        });
+        $level = ob_get_level();
+        ob_start();
+        try {
+            $encoded = $encoder($image);
+            $bytes = ob_get_contents();
+        } finally {
+            while (ob_get_level() > $level) {
+                ob_end_clean();
+            }
+            restore_error_handler();
+        }
+
+        if (!$encoded || !is_string($bytes) || $bytes === '') {
+            throw self::cannotEncode($format, is_string($warning) ? $warning : 'GD reported a failure');
+        }
+
+        return self::fromBytes($bytes);
+    }
+
+    /**
      * The unique reference to this image, for putting it inside text, such as an interpolated
      * string: `"Compare {$image} with the listing."`. It looks like
      * `<image:0c0ea0b06f1641dd8e4b64f2cbbd4c25>` and is the same string the image becomes in the
@@ -269,6 +346,11 @@ final class Image implements \JsonSerializable, \Stringable
     private static function unreadable(string $path, string $reason): AssetException
     {
         return new AssetException(sprintf("Image file '%s' could not be read: %s.", $path, $reason));
+    }
+
+    private static function cannotEncode(string $format, string $reason): \InvalidArgumentException
+    {
+        return new \InvalidArgumentException(sprintf('GD image could not be encoded as %s: %s.', $format, $reason));
     }
 
     private static function notAsciiText(): \InvalidArgumentException

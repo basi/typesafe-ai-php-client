@@ -17,6 +17,9 @@
         "phpstan/phpstan": "2.2.15",
         "squizlabs/php_codesniffer": "4.0.4"
     },
+    "suggest": {
+        "ext-gd": "Needed by Image::fromGd() to create an image from a GD image"
+    },
     "minimum-stability": "stable",
     "autoload": {
         "psr-4": {
