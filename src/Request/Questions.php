@@ -135,12 +135,16 @@ final class Questions implements \Countable
     /**
      * Build a {@see SystemOneRequest} from the questions declared so far.
      *
+     * @param array<array-key, mixed> $assets Map of reference string to
+     *     {@see \TypesafeAi\Request\Asset\ImageAsset}; see {@see SystemOneRequest::__construct()}.
+     *
      * @throws \InvalidArgumentException if no question has been added yet ({@see SystemOneRequest}
-     *     rejects an empty question map).
+     *     rejects an empty question map), or for any other reason {@see SystemOneRequest} rejects
+     *     its arguments.
      */
-    public function toRequest(mixed $state, ?string $model = null): SystemOneRequest
+    public function toRequest(mixed $state, ?string $model = null, array $assets = []): SystemOneRequest
     {
-        return new SystemOneRequest($state, $this->questions, $model);
+        return new SystemOneRequest($state, $this->questions, $model, $assets);
     }
 
     public function count(): int

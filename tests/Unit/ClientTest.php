@@ -19,6 +19,7 @@ use TypesafeAi\Exception\ServerException;
 use TypesafeAi\Exception\TimeoutException;
 use TypesafeAi\Exception\TransportException;
 use TypesafeAi\Exception\ValidationException;
+use TypesafeAi\Request\Asset\ImageAsset;
 use TypesafeAi\Request\Question\NoulQuestion;
 use TypesafeAi\Request\Questions;
 use TypesafeAi\Request\SystemOneRequest;
@@ -32,6 +33,8 @@ use TypesafeAi\Testing\MockHttpClient;
 
 final class ClientTest extends TestCase
 {
+    private const string IMAGE_REFERENCE = '5c0e9a12-door';
+
     /**
      * @return array<string, mixed>
      */
@@ -49,6 +52,16 @@ final class ClientTest extends TestCase
     private static function aQuestionRequest(?string $model = null): SystemOneRequest
     {
         return new SystemOneRequest('hello', ['q' => new NoulQuestion('Is this spam?')], $model);
+    }
+
+    private static function anImageRequest(?string $model = null): SystemOneRequest
+    {
+        return new SystemOneRequest(
+            ['door' => self::IMAGE_REFERENCE],
+            ['q' => new NoulQuestion('Is there a person in `door`?')],
+            $model,
+            [self::IMAGE_REFERENCE => new ImageAsset('png', 'QUJD')],
+        );
     }
 
     #[Test]
@@ -243,6 +256,148 @@ final class ClientTest extends TestCase
         self::assertInstanceOf(NoulAnswer::class, $answers[1]);
         self::assertInstanceOf(ScoreAnswer::class, $answers[2]);
         self::assertSame('req_eval123', $result->requestId());
+    }
+
+    #[Test]
+    public function systemOneSendsTheImagesHeaderWhenTheRequestHasAssets(): void
+    {
+        $mock = new MockHttpClient([JsonResponse::fromArray(200, self::validSystemOneBody())]);
+        $client = new Client('test-key', $mock);
+
+        $client->systemOne(self::anImageRequest());
+
+        $request = $mock->lastRequest();
+        self::assertNotNull($request);
+        self::assertSame('TypeSafe-Danger-Zone-Images', Client::HEADER_DANGER_ZONE_IMAGES);
+        self::assertSame('true', $request->getHeaderLine('TypeSafe-Danger-Zone-Images'));
+    }
+
+    #[Test]
+    public function systemOneSendsTheSameHeadersAsBeforeWhenTheRequestHasNoAssets(): void
+    {
+        $mock = new MockHttpClient([
+            JsonResponse::fromArray(200, self::validSystemOneBody()),
+            JsonResponse::fromArray(200, self::validSystemOneBody()),
+        ]);
+        $client = new Client('test-key', $mock);
+
+        $client->systemOne(self::aQuestionRequest());
+        $client->systemOne(self::anImageRequest());
+
+        $requests = $mock->requests();
+        $withoutAssets = array_keys($requests[0]->getHeaders());
+        $withAssets = array_keys($requests[1]->getHeaders());
+        self::assertFalse($requests[0]->hasHeader(Client::HEADER_DANGER_ZONE_IMAGES));
+        // The images header is the only difference between the headers of the two requests.
+        self::assertSame([Client::HEADER_DANGER_ZONE_IMAGES], array_values(array_diff($withAssets, $withoutAssets)));
+        self::assertSame([], array_diff($withoutAssets, $withAssets));
+    }
+
+    #[Test]
+    public function systemOneSendsTheImagesHeaderAndTheAssetsOnEveryAttempt(): void
+    {
+        $mock = new MockHttpClient([
+            JsonResponse::fromArray(429, ['detail' => 'slow down'], ['retry-after-ms' => '1']),
+            JsonResponse::fromArray(200, self::validSystemOneBody()),
+        ]);
+        $client = new Client('test-key', $mock);
+
+        $client->systemOne(self::anImageRequest());
+
+        $requests = $mock->requests();
+        self::assertCount(2, $requests);
+        self::assertFalse($requests[0]->hasHeader('X-TypeSafe-Retry-Count'));
+        self::assertSame('1', $requests[1]->getHeaderLine('X-TypeSafe-Retry-Count'));
+        foreach ($requests as $request) {
+            self::assertSame('true', $request->getHeaderLine(Client::HEADER_DANGER_ZONE_IMAGES));
+            self::assertStringContainsString('"data_base64":"QUJD"', (string) $request->getBody());
+        }
+    }
+
+    #[Test]
+    public function systemOneSendsTheAssetsInTheRequestBody(): void
+    {
+        $mock = new MockHttpClient([JsonResponse::fromArray(200, self::validSystemOneBody())]);
+        $client = new Client('test-key', $mock);
+
+        $client->systemOne(self::anImageRequest('jev-1.13.0'));
+
+        $request = $mock->lastRequest();
+        self::assertNotNull($request);
+        $sentBody = json_decode((string) $request->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        self::assertIsArray($sentBody);
+        self::assertSame('jev-1.13.0', $sentBody['model']);
+        self::assertSame(['door' => self::IMAGE_REFERENCE], $sentBody['state']);
+        self::assertSame(
+            [self::IMAGE_REFERENCE => ['type' => 'image', 'format' => 'png', 'data_base64' => 'QUJD']],
+            $sentBody['assets'],
+        );
+    }
+
+    #[Test]
+    public function systemOneKeepsTheAssetsWhenItFillsInTheDefaultModel(): void
+    {
+        $mock = new MockHttpClient([JsonResponse::fromArray(200, self::validSystemOneBody())]);
+        $client = new Client('test-key', $mock, options: new ClientOptions(defaultModel: 'jev-preview'));
+
+        $client->systemOne(self::anImageRequest());
+
+        $request = $mock->lastRequest();
+        self::assertNotNull($request);
+        $sentBody = json_decode((string) $request->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        self::assertIsArray($sentBody);
+        self::assertSame('jev-preview', $sentBody['model']);
+        self::assertSame(
+            [self::IMAGE_REFERENCE => ['type' => 'image', 'format' => 'png', 'data_base64' => 'QUJD']],
+            $sentBody['assets'],
+        );
+        self::assertSame('true', $request->getHeaderLine(Client::HEADER_DANGER_ZONE_IMAGES));
+    }
+
+    #[Test]
+    public function evaluatePassesTheAssetsOnToTheRequest(): void
+    {
+        $mock = new MockHttpClient([JsonResponse::fromArray(200, [
+            'model' => 'jev-latest',
+            'answers' => ['question_0' => ['type' => 'noul', 'noul' => 0.8]],
+            'usage' => ['input_tokens' => 12, 'output_tokens' => 2],
+        ])]);
+        $client = new Client('test-key', $mock);
+
+        $result = $client->evaluate(
+            ['door' => self::IMAGE_REFERENCE],
+            Questions::create()->noul('Is there a person in `door`?'),
+            assets: [self::IMAGE_REFERENCE => new ImageAsset('jpg', 'QUJD')],
+        );
+
+        $request = $mock->lastRequest();
+        self::assertNotNull($request);
+        self::assertSame('true', $request->getHeaderLine(Client::HEADER_DANGER_ZONE_IMAGES));
+        $sentBody = json_decode((string) $request->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        self::assertIsArray($sentBody);
+        self::assertSame(
+            [self::IMAGE_REFERENCE => ['type' => 'image', 'format' => 'jpg', 'data_base64' => 'QUJD']],
+            $sentBody['assets'],
+        );
+        self::assertInstanceOf(NoulAnswer::class, $result->answers()[0]);
+    }
+
+    #[Test]
+    public function evaluateWithoutAssetsDoesNotSendTheImagesHeaderOrAnAssetsField(): void
+    {
+        $mock = new MockHttpClient([JsonResponse::fromArray(200, [
+            'model' => 'jev-latest',
+            'answers' => ['question_0' => ['type' => 'noul', 'noul' => 0.8]],
+            'usage' => ['input_tokens' => 12, 'output_tokens' => 2],
+        ])]);
+        $client = new Client('test-key', $mock);
+
+        $client->evaluate('hello', Questions::create()->noul('Is this spam?'));
+
+        $request = $mock->lastRequest();
+        self::assertNotNull($request);
+        self::assertFalse($request->hasHeader(Client::HEADER_DANGER_ZONE_IMAGES));
+        self::assertStringNotContainsString('assets', (string) $request->getBody());
     }
 
     #[Test]

@@ -155,6 +155,123 @@ is both cheaper and faster than issuing separate requests. The API exposes no co
 sampling — no seed, temperature, or number-of-samples parameter — and, being probabilistic, the same
 question can get a different answer (or confidence) on a repeated call even with identical input.
 
+## Images (experimental)
+
+A request can include images. An image can go anywhere text can go: in the `state`, in a question's
+`instructions`, or in its criteria (a choice option's description, a score level, the `whenTrue` or
+`whenFalse` of a noul question). The model receives the image in place of the text.
+
+**This is experimental.** The provider labels images as not yet ready for production: the request
+format, the answers, and the limits can change between releases, and accuracy changes as the models
+are updated. They are fine for prototypes. Expect this part of the client to change with the API.
+
+An image is an `ImageAsset`. List each one once in the request's `assets` map, under a *reference*:
+a string that you also write wherever the image belongs.
+
+```php
+use TypesafeAi\Request\Asset\ImageAsset;
+use TypesafeAi\Request\Question\ChoiceQuestion;
+use TypesafeAi\Request\Question\NoulQuestion;
+use TypesafeAi\Request\SystemOneRequest;
+
+// A new random reference for each image, so that it cannot occur in your own text by accident.
+// A UUID works just as well.
+$door = bin2hex(random_bytes(16));
+
+$request = new SystemOneRequest(
+    state: ['door' => $door],
+    questions: [
+        'person_present' => new NoulQuestion('Is there a person in `door`?'),
+        'carrying' => new ChoiceQuestion('What is the person in `door` carrying?', [
+            'package' => 'A box or parcel.',
+            'bag' => 'A bag of groceries or shopping.',
+            'nothing' => 'Empty hands.',
+        ]),
+    ],
+    assets: [$door => ImageAsset::fromFile('door-camera.jpg')],
+);
+
+$response = $client->systemOne($request);
+```
+
+`Client::evaluate()` and `Questions::toRequest()` take the same map as their last argument:
+
+```php
+$result = $client->evaluate(
+    ['door' => $door],
+    Questions::create()->noul('Is there a person in `door`?'),
+    assets: [$door => ImageAsset::fromFile('door-camera.jpg')],
+);
+```
+
+`ImageAsset::fromFile($path)` reads a file on the local filesystem; `ImageAsset::fromBinary($bytes)`
+takes the bytes of an image you already hold in memory, such as an upload; and
+`new ImageAsset('png', $base64)` takes text that is already base64-encoded (the standard alphabet
+with `=` padding, no line breaks, no `data:` prefix). The first two detect the format from the
+file's PNG or JPEG signature unless you pass it as their second argument (`png`, `jpg`, or `jpeg`).
+
+**The images header is added for you.** The API only accepts an image in a request that carries the
+header `TypeSafe-Danger-Zone-Images: true` (answering `400` otherwise). This client sends it whenever
+the request has assets (`Client::HEADER_DANGER_ZONE_IMAGES`), on every attempt including retries, and
+sends exactly the headers it always sent when the request has none.
+
+### How references work
+
+- A reference goes inside a *string value* — the whole value, or part of a longer sentence — of the
+  `state`, of a question's instructions, or of its criteria, at any depth. A question refers to an
+  image in the state by its name in backticks, like the questions above.
+- **Object keys are never replaced.** A choice option's name, a question's name, and a key in the
+  state stay text. To define a choice option with a picture, put the reference in the option's
+  description.
+- **Every asset must be referenced at least once**, or the API answers `400`. `SystemOneRequest`
+  checks this when it is built: it throws an `\InvalidArgumentException` naming the first asset that
+  no string value refers to, including one that appears only as an object key.
+- References are matched as plain text, so a short one such as `cat` also matches inside
+  `category`. Use references that cannot occur in your text by accident: a new UUID for each image in
+  each request is the safest choice. A reference that PHP turns into an integer array key, such as
+  `123`, is rejected.
+- A reference is not empty or whitespace-only, and is at most 1,024 bytes of UTF-8
+  (`Limits::MAX_ASSET_REFERENCE_BYTES`); all the references of one request together are at most
+  65,536 bytes (`Limits::MAX_TOTAL_ASSET_REFERENCE_BYTES`). These count bytes, not characters, and
+  `SystemOneRequest` checks them.
+- Each use of a reference adds the image again to what the model reads, and to the size of the
+  request as the API expands it. When several questions need the same image, put it in the `state`
+  once and point at it from each question, instead of repeating the reference in every question.
+
+### Limits and preparing images
+
+The API validates these limits, and an image outside them is rejected, never resized to fit. This
+client exposes them as `Limits` constants but does not enforce them, so a violation surfaces as an
+`ApiException` with the HTTP status `400` or `413`.
+
+| Limit | Value | Constants |
+|---|---|---|
+| Format | PNG or JPEG, still images only (animated PNGs are rejected) | |
+| File size | 16 MiB per image; for base64, the size after decoding | `Limits::MAX_IMAGE_BYTES` |
+| Width and height | 256 to 1568 pixels each | `MIN_IMAGE_SIDE_PIXELS`, `MAX_IMAGE_SIDE_PIXELS` |
+| Total pixels (width × height) | 78,400 to 2,458,624 (a 280 × 280 to a 1568 × 1568 square, so 256 × 256 is too small) | `MIN_IMAGE_PIXELS`, `MAX_IMAGE_PIXELS` |
+| Request body | 32 MiB including the JSON and the base64 text of every image; compression does not raise it | `Limits::MAX_REQUEST_BODY_BYTES` |
+
+The API also limits all the images of a request together, and the request after every reference is
+replaced by its image, to 32 MiB each. This client sends images as base64 in the JSON body, which
+makes each one about a third larger than the file. The provider recommends multipart uploads, which
+send the file as it is; this client does not support them yet, nor Box questions. A request with
+images can be large, so you may want a higher `timeoutSeconds` in `ClientOptions` (see
+[Options](#options)) than the default of 30.
+
+**Prepare each image before you create the `ImageAsset`.** This client does not decode, resize,
+rotate, or convert images, and the API does not do it either:
+
+- **Resize.** Scale an image so that its longest side is at most 1568 pixels (a 12-megapixel phone
+  photo becomes 1568 × 1176), and scale up or pad one that is below the minimum.
+- **Rotate the pixels upright.** The API removes all metadata, including the EXIF orientation, and
+  does not apply it, so a photo that looks upright in your photo viewer can reach the model sideways.
+- **Send a still PNG or JPEG.** Convert GIF, WebP, HEIC and other formats, and export one frame of an
+  animation or video. A standard baseline 8-bit JPEG is the safest JPEG; re-save a progressive one.
+
+`var_dump()` and `print_r()` of an `ImageAsset`, or of a request that holds one, show the format and
+the size of the image instead of its base64 text.
+
 ## Options
 
 `ClientOptions` configures timeouts, the default model, and retry behaviour. Pass it to

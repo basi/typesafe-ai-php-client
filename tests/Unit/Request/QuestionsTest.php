@@ -6,6 +6,7 @@ namespace TypesafeAi\Tests\Unit\Request;
 
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
+use TypesafeAi\Request\Asset\ImageAsset;
 use TypesafeAi\Request\Question\ChoiceQuestion;
 use TypesafeAi\Request\Question\NoulQuestion;
 use TypesafeAi\Request\Questions;
@@ -122,6 +123,27 @@ final class QuestionsTest extends TestCase
 
         self::assertIsArray($decoded);
         self::assertSame('jev-preview', $decoded['model']);
+    }
+
+    #[Test]
+    public function toRequestOmitsAssetsByDefault(): void
+    {
+        $request = Questions::create()->noul('Is this urgent?')->toRequest('some state');
+
+        self::assertSame([], $request->assets());
+        self::assertStringNotContainsString('assets', json_encode($request, JSON_THROW_ON_ERROR));
+    }
+
+    #[Test]
+    public function toRequestPassesAssetsThrough(): void
+    {
+        $image = new ImageAsset('png', 'QUJD');
+
+        $request = Questions::create()
+            ->noul('Is there a person in `door`?')
+            ->toRequest(['door' => '5c0e9a12-door'], assets: ['5c0e9a12-door' => $image]);
+
+        self::assertSame(['5c0e9a12-door' => $image], $request->assets());
     }
 
     #[Test]

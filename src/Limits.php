@@ -9,6 +9,10 @@ namespace TypesafeAi;
  *
  * These are used for client-side validation so that a request which would be rejected by the
  * server fails fast, locally, with a clear message instead of a round trip ending in a 422.
+ *
+ * The exceptions are the image limits and the request body limit ({@see self::MAX_IMAGE_BYTES}
+ * through {@see self::MAX_REQUEST_BODY_BYTES}): this client only exposes them, so callers can
+ * prepare images to fit, and leaves enforcing them to the API.
  */
 final class Limits
 {
@@ -46,6 +50,54 @@ final class Limits
      * Maximum number of tokens processed per second.
      */
     public const int MAX_TOKENS_PER_SECOND = 250000;
+
+    /**
+     * Maximum size of one asset reference, in bytes of UTF-8 (not characters). A reference is a
+     * key of a request's `assets` map. Validated by {@see \TypesafeAi\Request\SystemOneRequest}.
+     */
+    public const int MAX_ASSET_REFERENCE_BYTES = 1024;
+
+    /**
+     * Maximum combined size of all the asset references in one request, in bytes of UTF-8.
+     * Validated by {@see \TypesafeAi\Request\SystemOneRequest}.
+     */
+    public const int MAX_TOTAL_ASSET_REFERENCE_BYTES = 65536;
+
+    /**
+     * Maximum size of one image file, in bytes (16 MiB). For base64 this is the size after
+     * decoding. Not checked by this client: the API rejects a larger image.
+     */
+    public const int MAX_IMAGE_BYTES = 16777216;
+
+    /**
+     * Minimum width and minimum height of an image, in pixels. Not checked by this client: the
+     * API rejects a smaller image instead of resizing it.
+     */
+    public const int MIN_IMAGE_SIDE_PIXELS = 256;
+
+    /**
+     * Maximum width and maximum height of an image, in pixels. Not checked by this client: the
+     * API rejects a larger image instead of resizing it.
+     */
+    public const int MAX_IMAGE_SIDE_PIXELS = 1568;
+
+    /**
+     * Minimum total number of pixels (width times height) of an image: the area of a 280 x 280
+     * square, so an image of 256 x 256 is too small. Not checked by this client.
+     */
+    public const int MIN_IMAGE_PIXELS = 78400;
+
+    /**
+     * Maximum total number of pixels (width times height) of an image: the area of a 1568 x 1568
+     * square. Not checked by this client.
+     */
+    public const int MAX_IMAGE_PIXELS = 2458624;
+
+    /**
+     * Maximum size of a request body, in bytes (32 MiB), including the base64 text of every image.
+     * Compression does not raise it. Not checked by this client: the API rejects a larger request.
+     */
+    public const int MAX_REQUEST_BODY_BYTES = 33554432;
 
     /**
      * Model alias used when a request does not specify one.

@@ -41,6 +41,14 @@ final class Client implements ClientInterface
      */
     public const VERSION = '0.1.6';
 
+    /**
+     * Name of the request header that turns images on. The API requires it, with the value `true`,
+     * on every request that contains an image; this client adds it on every attempt (retries
+     * included) of a request with assets, see {@see SystemOneRequest::assets()}, and never
+     * otherwise.
+     */
+    public const string HEADER_DANGER_ZONE_IMAGES = 'TypeSafe-Danger-Zone-Images';
+
     private readonly string $apiKey;
 
     private readonly Redactor $redactor;
@@ -100,7 +108,12 @@ final class Client implements ClientInterface
     {
         $effectiveRequest = $request->model() !== null
             ? $request
-            : new SystemOneRequest($request->state(), $request->questions(), $this->options->defaultModel);
+            : new SystemOneRequest(
+                $request->state(),
+                $request->questions(),
+                $this->options->defaultModel,
+                $request->assets(),
+            );
 
         $body = json_encode($effectiveRequest, JSON_THROW_ON_ERROR);
 
@@ -110,6 +123,7 @@ final class Client implements ClientInterface
             $body,
             static fn (string $responseBody, ?string $requestId): SystemOneResponse
                 => SystemOneResponse::fromJson($responseBody, $requestId),
+            $effectiveRequest->assets() === [] ? [] : [self::HEADER_DANGER_ZONE_IMAGES => 'true'],
         );
     }
 
@@ -117,14 +131,25 @@ final class Client implements ClientInterface
      * Builder entry point: evaluate $questions against $state in a single request, and strictly
      * decode the answers back out as a tuple in $questions' declaration order.
      *
+     * @param array<array-key, mixed> $assets Map of reference string to
+     *     {@see \TypesafeAi\Request\Asset\ImageAsset}, passed on to the request; see
+     *     {@see SystemOneRequest::__construct()}.
+     *
      * @see Questions for building $questions.
      * @see TypedSystemOneResponse for how the answers are decoded and accessed.
      *
      * @throws TypesafeAiException
      */
-    public function evaluate(mixed $state, Questions $questions, ?string $model = null): TypedSystemOneResponse
-    {
-        return TypedSystemOneResponse::decode($this->systemOne($questions->toRequest($state, $model)), $questions);
+    public function evaluate(
+        mixed $state,
+        Questions $questions,
+        ?string $model = null,
+        array $assets = [],
+    ): TypedSystemOneResponse {
+        return TypedSystemOneResponse::decode(
+            $this->systemOne($questions->toRequest($state, $model, $assets)),
+            $questions,
+        );
     }
 
     public function models(): array
@@ -142,11 +167,18 @@ final class Client implements ClientInterface
      *
      * @param \Closure(string, ?string): T $hydrate Builds the return value from a 2xx response's
      *     raw body and request id.
+     * @param array<string, string> $extraHeaders Sent on every attempt, retries included, in
+     *     addition to the standard headers.
      *
      * @return T
      */
-    private function sendWithRetry(string $method, string $url, ?string $body, \Closure $hydrate): mixed
-    {
+    private function sendWithRetry(
+        string $method,
+        string $url,
+        ?string $body,
+        \Closure $hydrate,
+        array $extraHeaders = [],
+    ): mixed {
         $attempt = 0;
 
         while (true) {
@@ -154,7 +186,7 @@ final class Client implements ClientInterface
                 $response = $this->transport->send(
                     $method,
                     $url,
-                    $this->headersForAttempt($method, $attempt),
+                    $this->headersForAttempt($method, $attempt, $extraHeaders),
                     $body,
                 );
             } catch (TransportException $exception) {
@@ -225,9 +257,11 @@ final class Client implements ClientInterface
     }
 
     /**
+     * @param array<string, string> $extraHeaders
+     *
      * @return array<string, string>
      */
-    private function headersForAttempt(string $method, int $attempt): array
+    private function headersForAttempt(string $method, int $attempt, array $extraHeaders = []): array
     {
         $headers = [
             'Authorization' => 'Bearer ' . $this->apiKey,
@@ -245,7 +279,7 @@ final class Client implements ClientInterface
             $headers['X-TypeSafe-Retry-Count'] = (string) $attempt;
         }
 
-        return $headers;
+        return [...$headers, ...$extraHeaders];
     }
 
     private static function userAgent(): string
