@@ -499,4 +499,180 @@ final class ClientTest extends TestCase
             self::assertStringContainsString($urlEncoded, $exception->getRawBody());
         }
     }
+
+    #[Test]
+    public function clientWideHeadersAreSentWithSystemOneAndWithModels(): void
+    {
+        $mock = new MockHttpClient([
+            JsonResponse::fromArray(200, self::validSystemOneBody()),
+            JsonResponse::fromArray(200, ['models' => []]),
+        ]);
+        $client = new Client('test-key', $mock, options: new ClientOptions(headers: ['X-Tenant' => '42']));
+
+        $client->systemOne(self::aQuestionRequest());
+        $client->models();
+
+        foreach ($mock->requests() as $request) {
+            self::assertSame(['42'], $request->getHeader('X-Tenant'));
+            self::assertSame('Bearer test-key', $request->getHeaderLine('Authorization'));
+        }
+    }
+
+    #[Test]
+    public function aRequestsOwnHeadersReplaceTheClientWideOnesWhateverTheCase(): void
+    {
+        $mock = new MockHttpClient([JsonResponse::fromArray(200, self::validSystemOneBody())]);
+        $client = new Client('test-key', $mock, options: new ClientOptions(headers: [
+            'X-Team' => 'default',
+            'X-Default' => 'kept',
+        ]));
+
+        $client->systemOne(new SystemOneRequest(
+            'hello',
+            ['q' => new NoulQuestion('Is this spam?')],
+            extraHeaders: ['x-team' => 'call'],
+        ));
+
+        $request = $mock->lastRequest();
+        self::assertNotNull($request);
+        self::assertSame(['call'], $request->getHeader('X-Team'));
+        self::assertSame(['kept'], $request->getHeader('X-Default'));
+    }
+
+    /**
+     * @return iterable<string, array{0: string, 1: string}>
+     */
+    public static function protectedHeaderProvider(): iterable
+    {
+        yield 'Authorization' => ['authorization', 'Bearer test-key'];
+        yield 'Accept' => ['ACCEPT', 'application/json'];
+        yield 'User-Agent' => ['user-agent', 'typesafe-ai-php-client/' . Client::VERSION];
+        yield 'X-TypeSafe-SDK' => ['x-typesafe-sdk', 'typesafe-ai-php-client/' . Client::VERSION];
+        yield 'X-TypeSafe-Runtime' => ['X-TypeSafe-Runtime', 'php/' . PHP_VERSION];
+        yield 'Content-Type' => ['content-type', 'application/json'];
+    }
+
+    #[Test]
+    #[DataProvider('protectedHeaderProvider')]
+    public function theHeadersTheClientAlwaysSetsCannotBeReplaced(string $name, string $expected): void
+    {
+        $mock = new MockHttpClient([JsonResponse::fromArray(200, self::validSystemOneBody())]);
+        $client = new Client('test-key', $mock, options: new ClientOptions(headers: [$name => 'from-client-options']));
+
+        $client->systemOne(new SystemOneRequest(
+            'hello',
+            ['q' => new NoulQuestion('Is this spam?')],
+            extraHeaders: [$name => 'from-the-request'],
+        ));
+
+        $request = $mock->lastRequest();
+        self::assertNotNull($request);
+        self::assertSame([$expected], $request->getHeader($name));
+    }
+
+    #[Test]
+    public function modelsKeepsTheClientsOwnHeadersToo(): void
+    {
+        $mock = new MockHttpClient([JsonResponse::fromArray(200, ['models' => []])]);
+        $client = new Client('test-key', $mock, options: new ClientOptions(headers: [
+            'authorization' => 'Bearer someone-elses-key',
+            'X-Tenant' => '42',
+        ]));
+
+        $client->models();
+
+        $request = $mock->lastRequest();
+        self::assertNotNull($request);
+        self::assertSame(['Bearer test-key'], $request->getHeader('Authorization'));
+        self::assertSame(['42'], $request->getHeader('X-Tenant'));
+    }
+
+    #[Test]
+    public function aCallerSuppliedRetryCountIsDroppedAndTheClientSetsItPerAttempt(): void
+    {
+        $mock = new MockHttpClient([
+            JsonResponse::fromArray(429, ['detail' => 'slow down'], ['retry-after-ms' => '1']),
+            JsonResponse::fromArray(200, self::validSystemOneBody()),
+        ]);
+        $client = new Client(
+            'test-key',
+            $mock,
+            options: new ClientOptions(headers: ['x-typesafe-retry-count' => '99']),
+        );
+
+        $client->systemOne(new SystemOneRequest(
+            'hello',
+            ['q' => new NoulQuestion('Is this spam?')],
+            extraHeaders: ['X-TypeSafe-Retry-Count' => '98'],
+        ));
+
+        self::assertCount(2, $mock->requests());
+        self::assertFalse($mock->requests()[0]->hasHeader('X-TypeSafe-Retry-Count'));
+        self::assertSame(['1'], $mock->requests()[1]->getHeader('X-TypeSafe-Retry-Count'));
+    }
+
+    #[Test]
+    public function everyAttemptSendsTheSameCallerHeaders(): void
+    {
+        $mock = new MockHttpClient([
+            JsonResponse::fromArray(429, ['detail' => 'slow down'], ['retry-after-ms' => '1']),
+            JsonResponse::fromArray(200, self::validSystemOneBody()),
+        ]);
+        $client = new Client('test-key', $mock, options: new ClientOptions(headers: ['X-Default' => 'kept']));
+
+        $client->systemOne(new SystemOneRequest(
+            'hello',
+            ['q' => new NoulQuestion('Is this spam?')],
+            extraHeaders: ['X-Call' => 'call'],
+        ));
+
+        self::assertCount(2, $mock->requests());
+        foreach ($mock->requests() as $request) {
+            self::assertSame(['kept'], $request->getHeader('X-Default'));
+            self::assertSame(['call'], $request->getHeader('X-Call'));
+        }
+    }
+
+    #[Test]
+    public function fillingInTheDefaultModelKeepsTheRequestsExtraHeaders(): void
+    {
+        $mock = new MockHttpClient([JsonResponse::fromArray(200, self::validSystemOneBody())]);
+        $client = new Client('test-key', $mock, options: new ClientOptions(defaultModel: 'jev-preview'));
+
+        $client->systemOne(new SystemOneRequest(
+            'hello',
+            ['q' => new NoulQuestion('Is this spam?')],
+            extraHeaders: ['X-Call' => 'call'],
+        ));
+
+        $request = $mock->lastRequest();
+        self::assertNotNull($request);
+        self::assertSame(['call'], $request->getHeader('X-Call'));
+        $sentBody = json_decode((string) $request->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        self::assertIsArray($sentBody);
+        self::assertSame('jev-preview', $sentBody['model']);
+    }
+
+    #[Test]
+    public function evaluateSendsTheExtraHeaders(): void
+    {
+        $mock = new MockHttpClient([
+            JsonResponse::fromArray(200, [
+                'model' => 'jev-latest',
+                'answers' => ['question_0' => ['type' => 'noul', 'noul' => 0.7]],
+                'usage' => ['input_tokens' => 1, 'output_tokens' => 1],
+            ]),
+        ]);
+        $client = new Client('test-key', $mock);
+
+        $client->evaluate(
+            'some text',
+            Questions::create()->noul('Is this urgent?'),
+            extraHeaders: ['X-Call' => 'call'],
+        );
+
+        $request = $mock->lastRequest();
+        self::assertNotNull($request);
+        self::assertSame(['call'], $request->getHeader('X-Call'));
+    }
 }

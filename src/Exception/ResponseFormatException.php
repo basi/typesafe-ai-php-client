@@ -32,7 +32,7 @@ final class ResponseFormatException extends \UnexpectedValueException implements
     }
 
     /**
-     * The answer at $path does not have the expected answer kind (`noul`, `choice`, or `score`).
+     * The answer at $path does not have the expected answer kind (`noul`, `choice`, `score`, or `box`).
      *
      * @param non-empty-string $path Dot-separated path to the answer, e.g. "answers.urgency".
      */

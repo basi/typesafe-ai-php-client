@@ -10,16 +10,25 @@ namespace TypesafeAi\Request\Question;
 final readonly class NoulQuestion implements QuestionInterface
 {
     /**
-     * @param string $instructions The yes/no question or statement to evaluate.
-     * @param ?string $whenTrue What counts as a "yes" answer. Omitted from the request when null.
-     * @param ?string $whenFalse What counts as a "no" answer. Omitted from the request when null.
+     * Mirrors the official SDK (0.7.5), whose question fields take JSON content rather than only
+     * text: a string, a list or map of values (nested to any depth), or an object that encodes as
+     * JSON, such as a {@see \JsonSerializable} or an {@see \TypesafeAi\Request\Image}. A string
+     * $instructions must not be empty; an array or an object, and any $whenTrue or $whenFalse, is
+     * sent as it is, and the API decides whether it makes sense.
+     *
+     * @param string|array<array-key, mixed>|object $instructions The yes/no question or statement
+     *     to evaluate.
+     * @param string|array<array-key, mixed>|object|null $whenTrue What counts as a "yes" answer.
+     *     Omitted from the request when null.
+     * @param string|array<array-key, mixed>|object|null $whenFalse What counts as a "no" answer.
+     *     Omitted from the request when null.
      */
     public function __construct(
-        private string $instructions,
-        private ?string $whenTrue = null,
-        private ?string $whenFalse = null,
+        private string|array|object $instructions,
+        private string|array|object|null $whenTrue = null,
+        private string|array|object|null $whenFalse = null,
     ) {
-        if (trim($instructions) === '') {
+        if (is_string($instructions) && trim($instructions) === '') {
             throw new \InvalidArgumentException('instructions must not be empty.');
         }
     }

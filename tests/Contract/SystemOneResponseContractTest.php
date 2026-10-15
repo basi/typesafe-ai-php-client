@@ -7,6 +7,7 @@ namespace TypesafeAi\Tests\Contract;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
+use TypesafeAi\Response\Answer\BoxAnswer;
 use TypesafeAi\Response\Answer\ChoiceAnswer;
 use TypesafeAi\Response\Answer\NoulAnswer;
 use TypesafeAi\Response\Answer\ScoreAnswer;
@@ -46,9 +47,12 @@ final class SystemOneResponseContractTest extends TestCase
 
         foreach ($response->answers() as $name => $answer) {
             self::assertTrue(
-                $answer instanceof NoulAnswer || $answer instanceof ScoreAnswer || $answer instanceof ChoiceAnswer,
+                $answer instanceof NoulAnswer
+                    || $answer instanceof ScoreAnswer
+                    || $answer instanceof ChoiceAnswer
+                    || $answer instanceof BoxAnswer,
                 sprintf(
-                    'answer "%s" in %s should be a NoulAnswer, ScoreAnswer, or ChoiceAnswer, got %s',
+                    'answer "%s" in %s should be a NoulAnswer, ScoreAnswer, ChoiceAnswer, or BoxAnswer, got %s',
                     $name,
                     basename($path),
                     $answer::class,
@@ -60,6 +64,19 @@ final class SystemOneResponseContractTest extends TestCase
                 // gettype() (a plain string comparison, unlike assertIsFloat()) still exercises
                 // that guarantee without PHPStan treating the check itself as dead code.
                 self::assertSame('double', gettype($answer->noul()));
+            }
+
+            if ($answer instanceof BoxAnswer) {
+                $box = $answer->box();
+                foreach ([$box->top(), $box->bottom(), $box->left(), $box->right()] as $edge) {
+                    self::assertSame('double', gettype($edge));
+                    self::assertGreaterThanOrEqual(0.0, $edge);
+                    self::assertLessThanOrEqual(1.0, $edge);
+                }
+                self::assertLessThan($box->right(), $box->left());
+                self::assertLessThan($box->bottom(), $box->top());
+                $confidence = $answer->confidence();
+                self::assertTrue($confidence === null || ($confidence >= 0.0 && $confidence <= 1.0));
             }
 
             if ($answer instanceof ChoiceAnswer) {
@@ -111,6 +128,40 @@ final class SystemOneResponseContractTest extends TestCase
     }
 
     #[Test]
+    public function recordedBoxFixtureHydratesTheBoxOfARedSquare(): void
+    {
+        $body = file_get_contents(__DIR__ . '/fixtures/recorded/systemone-36.json');
+        self::assertNotFalse($body);
+
+        $response = SystemOneResponse::fromJson($body);
+
+        self::assertSame('jev-1.14.0', $response->model());
+        self::assertSame(['red_square'], array_keys($response->boxes()));
+        $answer = $response->boxes()['red_square'];
+        self::assertSame(['top' => 0.25, 'bottom' => 0.75, 'left' => 0.25, 'right' => 0.76], $answer->box()->toArray());
+        self::assertSame(0.84, $answer->confidence());
+    }
+
+    #[Test]
+    public function recordedFixtureWithImagesAsCriteriaHoldsTheirReferencesInTheLegend(): void
+    {
+        $body = file_get_contents(__DIR__ . '/fixtures/recorded/systemone-37.json');
+        self::assertNotFalse($body);
+
+        $response = SystemOneResponse::fromJson($body);
+
+        $similarity = $response->scores()['similarity'];
+        self::assertCount(2, $similarity->legend());
+        foreach ($similarity->legend() as $level) {
+            // The API answers with the reference of an image, not the image.
+            self::assertIsString($level);
+            self::assertMatchesRegularExpression('/^<image:[0-9a-f]{32}>$/D', $level);
+        }
+        self::assertSame('red', $response->choices()['color']->choice());
+        self::assertSame(0.99, $response->nouls()['is_red']->noul());
+    }
+
+    #[Test]
     public function syntheticChoiceResponseHydrates(): void
     {
         $body = file_get_contents(__DIR__ . '/fixtures/synthetic/choice-response.json');
@@ -132,5 +183,34 @@ final class SystemOneResponseContractTest extends TestCase
 
         self::assertGreaterThanOrEqual(0, $response->usage()->inputTokens());
         self::assertGreaterThanOrEqual(0, $response->usage()->outputTokens());
+    }
+
+    #[Test]
+    public function syntheticBoxResponseHydrates(): void
+    {
+        $body = file_get_contents(__DIR__ . '/fixtures/synthetic/box-response.json');
+        self::assertNotFalse($body);
+
+        $response = SystemOneResponse::fromJson($body);
+
+        self::assertCount(2, $response->answers());
+        foreach ($response->answers() as $answer) {
+            self::assertInstanceOf(BoxAnswer::class, $answer);
+            $box = $answer->box();
+            foreach ([$box->top(), $box->bottom(), $box->left(), $box->right()] as $edge) {
+                self::assertSame('double', gettype($edge));
+                self::assertGreaterThanOrEqual(0.0, $edge);
+                self::assertLessThanOrEqual(1.0, $edge);
+            }
+        }
+
+        $dog = $response->answer('dog');
+        self::assertInstanceOf(BoxAnswer::class, $dog);
+        self::assertSame(0.9, $dog->confidence());
+        self::assertSame(0.2, $dog->box()->top());
+
+        $unsure = $response->answer('unsure');
+        self::assertInstanceOf(BoxAnswer::class, $unsure);
+        self::assertNull($unsure->confidence());
     }
 }

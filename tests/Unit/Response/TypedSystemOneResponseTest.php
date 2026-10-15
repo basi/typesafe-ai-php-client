@@ -8,6 +8,7 @@ use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use TypesafeAi\Exception\ResponseFormatException;
 use TypesafeAi\Request\Questions;
+use TypesafeAi\Response\Answer\BoxAnswer;
 use TypesafeAi\Response\Answer\ChoiceAnswer;
 use TypesafeAi\Response\Answer\NoulAnswer;
 use TypesafeAi\Response\Answer\ScoreAnswer;
@@ -217,5 +218,65 @@ final class TypedSystemOneResponseTest extends TestCase
 
         self::assertSame(['topic', 'question_1', 'question_2'], $typed->names());
         self::assertTrue($typed->response()->hasAnswer('bonus'));
+    }
+
+    #[Test]
+    public function decodesABoxAnswerForABoxQuestion(): void
+    {
+        $questions = Questions::create()->box('The dog', name: 'dog')->noul('Is it urgent?');
+        $response = SystemOneResponse::fromJson(json_encode([
+            'model' => 'jev-1.14.0',
+            'answers' => [
+                'dog' => [
+                    'type' => 'box',
+                    'box' => ['top' => 0.2, 'bottom' => 0.66, 'left' => 0.19, 'right' => 0.68],
+                    'confidence' => null,
+                ],
+                'question_1' => ['type' => 'noul', 'noul' => 0.7],
+            ],
+            'usage' => ['input_tokens' => 10, 'output_tokens' => 5],
+        ], JSON_THROW_ON_ERROR));
+
+        $typed = TypedSystemOneResponse::decode($response, $questions);
+
+        self::assertInstanceOf(BoxAnswer::class, $typed->answer('dog'));
+        self::assertSame(0.66, $typed->box('dog')->box()->bottom());
+        self::assertSame(0.66, $typed->box(0)->box()->bottom());
+        self::assertNull($typed->box('dog')->confidence());
+        self::assertSame(0.7, $typed->noul(1)->noul());
+    }
+
+    #[Test]
+    public function aBoxAccessorOnAnotherKindOfAnswerThrowsLogicException(): void
+    {
+        $typed = TypedSystemOneResponse::decode(self::response(), self::questions());
+
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessage('Answer "topic" is a "choice" answer, not a "box" answer.');
+
+        $typed->box('topic');
+    }
+
+    #[Test]
+    public function aBoxQuestionAnsweredWithAnotherKindIsAMismatch(): void
+    {
+        $response = self::response(['question_1' => ['type' => 'noul', 'noul' => 0.5]]);
+
+        $this->expectException(ResponseFormatException::class);
+        $this->expectExceptionMessage('answers.question_1: expected a "box" answer, got "noul".');
+
+        TypedSystemOneResponse::decode($response, Questions::create()
+            ->choice('Category?', ['billing' => null, 'technical' => null], name: 'topic')
+            ->box('The dog'));
+    }
+
+    #[Test]
+    public function aBoxAccessorOnAnUnknownPositionThrowsOutOfBoundsException(): void
+    {
+        $typed = TypedSystemOneResponse::decode(self::response(), self::questions());
+
+        $this->expectException(\OutOfBoundsException::class);
+
+        $typed->box(99);
     }
 }

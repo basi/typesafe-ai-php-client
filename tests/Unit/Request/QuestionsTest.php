@@ -6,9 +6,12 @@ namespace TypesafeAi\Tests\Unit\Request;
 
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
+use TypesafeAi\Request\Image;
+use TypesafeAi\Request\Question\BoxQuestion;
 use TypesafeAi\Request\Question\ChoiceQuestion;
 use TypesafeAi\Request\Question\NoulQuestion;
 use TypesafeAi\Request\Questions;
+use TypesafeAi\Tests\Support\Samples;
 
 final class QuestionsTest extends TestCase
 {
@@ -122,6 +125,104 @@ final class QuestionsTest extends TestCase
 
         self::assertIsArray($decoded);
         self::assertSame('jev-preview', $decoded['model']);
+    }
+
+    #[Test]
+    public function theBuilderMethodsAcceptJsonContent(): void
+    {
+        $questions = Questions::create()
+            ->noul(['task' => 'Is it urgent?'], whenTrue: ['yes' => 'now'], whenFalse: (object) ['no' => 'later'])
+            ->choice(['task' => 'Which team?'], ['billing' => ['covers' => 'refunds'], 'other' => null])
+            ->score(['task' => 'How severe?'], ['minor', ['covers' => 'outage']]);
+
+        $encoded = json_encode($questions->toRequest('some state'), JSON_THROW_ON_ERROR);
+
+        self::assertJsonStringEqualsJsonString(
+            <<<'JSON'
+            {
+                "state": "some state",
+                "questions": {
+                    "question_0": {
+                        "type": "noul",
+                        "instructions": {"task": "Is it urgent?"},
+                        "criteria": {"true": {"yes": "now"}, "false": {"no": "later"}}
+                    },
+                    "question_1": {
+                        "type": "choice",
+                        "instructions": {"task": "Which team?"},
+                        "criteria": {"billing": {"covers": "refunds"}, "other": null}
+                    },
+                    "question_2": {
+                        "type": "score",
+                        "instructions": {"task": "How severe?"},
+                        "criteria": ["minor", {"covers": "outage"}]
+                    }
+                }
+            }
+            JSON,
+            $encoded,
+        );
+    }
+
+    #[Test]
+    public function boxAddsABoxQuestion(): void
+    {
+        $questions = Questions::create()->box('The dog')->box(name: 'whole');
+
+        self::assertSame(['question_0', 'whole'], $questions->names());
+        self::assertInstanceOf(BoxQuestion::class, $questions->toArray()['question_0']);
+        self::assertSame(
+            '{"state":"photo","questions":{"question_0":{"type":"box","instructions":"The dog"},'
+            . '"whole":{"type":"box"}}}',
+            json_encode($questions->toRequest('photo'), JSON_THROW_ON_ERROR),
+        );
+    }
+
+    #[Test]
+    public function boxAcceptsJsonContent(): void
+    {
+        $questions = Questions::create()->box(['find' => ['the dog']]);
+
+        self::assertSame(
+            '{"state":"photo","questions":{"question_0":{"type":"box","instructions":{"find":["the dog"]}}}}',
+            json_encode($questions->toRequest('photo'), JSON_THROW_ON_ERROR),
+        );
+    }
+
+    #[Test]
+    public function toRequestPassesTheNamedImagesOn(): void
+    {
+        $photo = Image::fromBytes(Samples::PNG);
+
+        $request = Questions::create()
+            ->noul('Is <photo> damaged?')
+            ->toRequest('some state', assets: ['<photo>' => $photo]);
+
+        self::assertSame(['<photo>' => $photo], $request->assets());
+    }
+
+    #[Test]
+    public function toRequestPassesTheNamedImagesAndTheExtraHeadersOnTogether(): void
+    {
+        $photo = Image::fromBytes(Samples::PNG);
+
+        $request = Questions::create()
+            ->noul('Is <photo> damaged?')
+            ->toRequest('some state', 'jev-preview', ['<photo>' => $photo], ['X-Tenant' => '42']);
+
+        self::assertSame('jev-preview', $request->model());
+        self::assertSame(['<photo>' => $photo], $request->assets());
+        self::assertSame(['X-Tenant' => '42'], $request->extraHeaders());
+    }
+
+    #[Test]
+    public function toRequestPassesTheExtraHeadersOn(): void
+    {
+        $request = Questions::create()
+            ->noul('Is this urgent?')
+            ->toRequest('some state', extraHeaders: ['X-Tenant' => '42']);
+
+        self::assertSame(['X-Tenant' => '42'], $request->extraHeaders());
     }
 
     #[Test]

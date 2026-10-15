@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace TypesafeAi\Tests\Unit\Response;
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Test;
 use PHPUnit\Framework\TestCase;
 use TypesafeAi\Exception\ResponseFormatException;
+use TypesafeAi\Response\Answer\BoxAnswer;
 use TypesafeAi\Response\Answer\ChoiceAnswer;
 use TypesafeAi\Response\Answer\NoulAnswer;
 use TypesafeAi\Response\Answer\ScoreAnswer;
@@ -86,6 +88,100 @@ final class SystemOneResponseTest extends TestCase
         self::assertArrayHasKey(0, $answer->legend());
         self::assertArrayHasKey('1', $answer->probabilities());
         self::assertArrayHasKey(1, $answer->probabilities());
+    }
+
+    #[Test]
+    public function hydratesAScoreAnswerWhoseLegendHoldsJsonContent(): void
+    {
+        $data = self::validData();
+        $data['answers'] = [
+            'urgency' => [
+                'type' => 'score',
+                'score' => 1,
+                'confidence' => 0.5,
+                'legend' => [
+                    '0' => 'Can wait',
+                    '1' => ['meaning' => 'Needs attention', 'examples' => ['today', ['note' => null]]],
+                    '2' => ['listed', 'level'],
+                ],
+                'probabilities' => ['0' => 0.1, '1' => 0.8, '2' => 0.1],
+            ],
+        ];
+
+        $answer = SystemOneResponse::fromJson(json_encode($data, JSON_THROW_ON_ERROR))->answer('urgency');
+
+        self::assertInstanceOf(ScoreAnswer::class, $answer);
+        $entries = array_values($answer->legend());
+        self::assertCount(3, $entries);
+        self::assertSame('Can wait', $entries[0]);
+        self::assertEquals(['meaning' => 'Needs attention', 'examples' => ['today', ['note' => null]]], $entries[1]);
+        self::assertEquals(['listed', 'level'], $entries[2]);
+        self::assertSame($answer->legend(), $answer->toArray()['legend']);
+    }
+
+    /**
+     * @return iterable<string, array{0: mixed, 1: string}>
+     */
+    public static function invalidLegendEntryProvider(): iterable
+    {
+        yield 'integer' => [5, 'int'];
+        yield 'null' => [null, 'null'];
+        yield 'boolean' => [true, 'bool'];
+    }
+
+    #[Test]
+    #[DataProvider('invalidLegendEntryProvider')]
+    public function aLegendEntryThatIsNeitherTextNorJsonContentIsRejected(mixed $entry, string $type): void
+    {
+        $data = self::validData();
+        $data['answers'] = [
+            'urgency' => [
+                'type' => 'score',
+                'score' => 1,
+                'confidence' => 0.5,
+                'legend' => ['0' => 'Can wait', '1' => $entry],
+                'probabilities' => ['0' => 0.5, '1' => 0.5],
+            ],
+        ];
+
+        $this->expectException(ResponseFormatException::class);
+        $this->expectExceptionMessage(
+            sprintf('answers.urgency.legend.1: expected a string, an array, or an object, got %s.', $type),
+        );
+
+        SystemOneResponse::fromJson(json_encode($data, JSON_THROW_ON_ERROR));
+    }
+
+    #[Test]
+    public function hydratesABoxAnswerRatherThanKeepingItAsUnknown(): void
+    {
+        $data = self::validData();
+        $data['answers'] = [
+            'dog' => [
+                'type' => 'box',
+                'box' => ['top' => 0.2, 'bottom' => 0.66, 'left' => 0.19, 'right' => 0.68],
+                'confidence' => 0.9,
+            ],
+        ];
+
+        $answer = SystemOneResponse::fromJson(json_encode($data, JSON_THROW_ON_ERROR))->answer('dog');
+
+        self::assertInstanceOf(BoxAnswer::class, $answer);
+        self::assertSame('box', $answer->type());
+        self::assertSame(0.66, $answer->box()->bottom());
+        self::assertSame(0.9, $answer->confidence());
+    }
+
+    #[Test]
+    public function aBoxAnswerWithoutItsBoxIsRejectedByPath(): void
+    {
+        $data = self::validData();
+        $data['answers'] = ['dog' => ['type' => 'box', 'confidence' => null]];
+
+        $this->expectException(ResponseFormatException::class);
+        $this->expectExceptionMessage('answers.dog.box: field is required but missing.');
+
+        SystemOneResponse::fromJson(json_encode($data, JSON_THROW_ON_ERROR));
     }
 
     #[Test]
@@ -269,5 +365,86 @@ final class SystemOneResponseTest extends TestCase
         $response = SystemOneResponse::fromJson(self::validBody());
 
         self::assertNull($response->requestId());
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function dataWithEveryKindOfAnswer(): array
+    {
+        $data = self::validData();
+        $data['answers'] = [
+            'dog' => [
+                'type' => 'box',
+                'box' => ['top' => 0.1, 'bottom' => 0.9, 'left' => 0.2, 'right' => 0.8],
+                'confidence' => null,
+            ],
+            'spam' => ['type' => 'noul', 'noul' => 0.1],
+            'mystery' => ['type' => 'future-type', 'future_field' => 1],
+            'tone' => [
+                'type' => 'choice',
+                'choice' => 'calm',
+                'confidence' => 0.8,
+                'probabilities' => ['calm' => 0.8, 'angry' => 0.2],
+            ],
+            'urgent' => ['type' => 'noul', 'noul' => 0.9],
+            'severity' => [
+                'type' => 'score',
+                'score' => 1.0,
+                'confidence' => 0.7,
+                'legend' => ['0' => 'low', '1' => 'high'],
+                'probabilities' => ['0' => 0.3, '1' => 0.7],
+            ],
+            'cat' => [
+                'type' => 'box',
+                'box' => ['top' => 0.0, 'bottom' => 0.5, 'left' => 0.0, 'right' => 0.5],
+                'confidence' => 0.4,
+            ],
+        ];
+
+        return $data;
+    }
+
+    #[Test]
+    public function groupsTheAnswersByTypeKeepingTheirNamesAndTheirOrder(): void
+    {
+        $response = SystemOneResponse::fromJson(json_encode(self::dataWithEveryKindOfAnswer(), JSON_THROW_ON_ERROR));
+
+        self::assertSame(['spam', 'urgent'], array_keys($response->nouls()));
+        self::assertSame(['tone'], array_keys($response->choices()));
+        self::assertSame(['severity'], array_keys($response->scores()));
+        self::assertSame(['dog', 'cat'], array_keys($response->boxes()));
+    }
+
+    #[Test]
+    public function theGroupsHoldTheSameObjectsAsAnswers(): void
+    {
+        $response = SystemOneResponse::fromJson(json_encode(self::dataWithEveryKindOfAnswer(), JSON_THROW_ON_ERROR));
+
+        self::assertSame($response->answer('urgent'), $response->nouls()['urgent']);
+        self::assertSame($response->answer('tone'), $response->choices()['tone']);
+        self::assertSame($response->answer('severity'), $response->scores()['severity']);
+        self::assertSame($response->answer('cat'), $response->boxes()['cat']);
+        self::assertCount(7, $response->answers());
+    }
+
+    #[Test]
+    public function anAnswerOfATypeThisClientDoesNotKnowIsInNoGroup(): void
+    {
+        $response = SystemOneResponse::fromJson(json_encode(self::dataWithEveryKindOfAnswer(), JSON_THROW_ON_ERROR));
+
+        $grouped = [...$response->nouls(), ...$response->choices(), ...$response->scores(), ...$response->boxes()];
+
+        self::assertArrayNotHasKey('mystery', $grouped);
+        self::assertCount(6, $grouped);
+    }
+
+    #[Test]
+    public function aGroupWithoutAnswersIsEmpty(): void
+    {
+        $response = SystemOneResponse::fromJson(self::validBody());
+
+        self::assertSame([], $response->boxes());
+        self::assertSame(['billing'], array_keys($response->nouls()));
     }
 }

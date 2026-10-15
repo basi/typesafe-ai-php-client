@@ -10,7 +10,7 @@ namespace TypesafeAi\Response\Answer;
 interface AnswerInterface
 {
     /**
-     * The answer type discriminator: "noul", "choice", "score", or, for a type this client
+     * The answer type discriminator: "noul", "choice", "score", "box", or, for a type this client
      * version does not recognise, whatever string the server sent.
      */
     public function type(): string;
